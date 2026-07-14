@@ -1,0 +1,252 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>macOS ProMotion — a non-composited CSS animation is presented irregularly on a 120 Hz display, and a concurrent transform animation inherits the same cadence</title>
+
+<!--
+  MINIMAL REPRO — macOS, 120 Hz ProMotion display.
+  The window must be wide enough for card A to reach 1000px, or the two motions are no longer
+  equal — the page checks this and disables the A/B run rather than mislead you.
+
+  Two cards. IDENTICAL motion (content glides 300px left, 600ms, linear). DIFFERENT pipeline:
+
+      A · max-width 400px -> 1000px      max-width is not compositable => requires main-thread
+                                         style/layout updates
+      B · transform: translateX(-300px)  transform is COMPOSITOR-ELIGIBLE
+
+  A compositor-eligible transform advances on 98% of nominal 120 Hz intervals when it runs
+  ALONE, but on only 54-59% when it runs CONCURRENTLY with the layout animation — matching that
+  animation's own cadence within the resolution of the experiment.  The layout animation alone
+  advances on 59%.  With DevTools open, both advance on 97%.  requestAnimationFrame callbacks
+  keep arriving at a steady ~120 Hz in every one of those cases.
+
+  Opening DevTools usually suppresses this.  So does running a screen recorder, and so does
+  attaching CDP — which is why the measurements had to be taken with an external 240 fps
+  camera.  Tick the checkbox to stamp every rAF callback with an id (decimal + 8-bit binary)
+  so that such footage can be decoded.
+
+  NOTE the counter on this page measures the rAF CALLBACK RATE only.  It does not show that
+  the visual state written by each callback was painted, composited or presented.
+
+  FULL WRITE-UP — measurements, method, caveats, analysis scripts, raw footage:  README.md
+-->
+
+<style>
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 30px;
+    background: #eef0f4;
+    font: 16px/1.6 -apple-system, system-ui, sans-serif;
+    color: #111827;
+  }
+
+  .block { width: 100%; }
+  .tag {
+    text-align: center;
+    margin-bottom: 8px;
+    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #6b7280;
+  }
+  .row { display: flex; justify-content: center; }   /* centred → the card's content moves horizontally */
+
+  .card {
+    width: 100%;
+    max-width: 400px;
+    box-sizing: border-box;
+    padding: 24px 32px;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .12);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  /* A — max-width is not compositable, so its intermediate values require main-thread
+     style/layout work during the transition. */
+  #cardA { transition: max-width 600ms linear; }
+  #cardA.wide { max-width: 1000px; }
+
+  /* B — transform is COMPOSITOR-ELIGIBLE. Same 300px of content motion, same 600ms, same
+     easing. Stated as eligibility, not as a verified fact about layerisation: whether it is
+     actually promoted to its own layer can only be confirmed in DevTools, and opening DevTools
+     suppresses the very thing being measured. What IS measured is that it runs at 98% of the
+     nominal 120 Hz cadence when it runs alone. */
+  #cardB { transition: transform 600ms linear; }
+  #cardB.shifted { transform: translateX(-300px); }
+
+  ul { margin: 0; padding-left: 20px; }
+  /* Short items that never wrap. Card A's whole point IS layout, so this does not avoid reflow —
+     it keeps the text's line structure constant while the card resizes, so what you see moving is
+     the content sliding, not lines re-wrapping. */
+  li { white-space: nowrap; }
+
+  #both {
+    padding: 8px 16px; border: 1px solid #d1d5db; border-radius: 8px;
+    background: #fff; cursor: pointer; font: inherit; font-size: 14px;
+  }
+  #ctrl {
+    display: flex; align-items: center; gap: 6px;    /* checkbox vertically centred with its text */
+    font-size: 13px; color: #6b7280; user-select: none; cursor: pointer;
+  }
+  #ctrl input { margin: 0; }
+
+  /* rAF-state counter — OFF by default, so the repro itself does no per-frame DOM work.
+     Switch it on only for external-camera analysis: every rAF callback writes a unique
+     visual id. An id absent from the footage is an rAF-generated DOM state that was not
+     observed on the display; it does not reveal at which pipeline stage it was coalesced
+     or lost.
+
+     position:fixed, a fixed three-digit width and tabular numerals keep the counter out of
+     the cards' layout, so its updates cannot change their geometry. The counter still adds
+     main-thread style/layout/paint work of its own — which is exactly why it is off by
+     default, and why the cadence measurement in the README does not use it. */
+  #fc {
+    position: fixed; top: 22px; right: 22px;
+    padding: 10px 14px; border-radius: 10px; background: #fff;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
+    text-align: center;
+  }
+  #fcNum {
+    font: 700 36px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums;      /* fixed-width digits keep the counter's width stable */
+    letter-spacing: 2px; color: #111;
+  }
+  #fcBits { display: flex; gap: 4px; margin-top: 10px; }
+  #fcBits i { width: 24px; height: 24px; border: 2px solid #111; background: #fff; }
+  #fcBits i.on { background: #111; }
+
+  #hint {
+    position: fixed; top: 16px; left: 0; right: 0;
+    text-align: center; font-size: 13px; color: #6b7280;
+  }
+  #fps {
+    position: fixed; left: 14px; bottom: 14px;
+    padding: 8px 10px; border-radius: 6px;
+    background: #111; color: #0f0;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre;
+  }
+</style>
+
+<div id="hint">Both cards move their content <b>300px left, 600 ms, linear</b> — only the pipeline differs. Click either, or run both.</div>
+
+<div class="block">
+  <div class="tag">A · max-width 400 → 1000px — LAYOUT (main thread)</div>
+  <div class="row">
+    <div class="card" id="cardA">
+      <ul><li>Alpha</li><li>Bravo</li><li>Charlie</li><li>Delta</li><li>Echo</li></ul>
+    </div>
+  </div>
+</div>
+
+<div class="block">
+  <div class="tag">B · transform: translateX(-300px) — COMPOSITOR-ELIGIBLE</div>
+  <div class="row">
+    <div class="card" id="cardB">
+      <ul><li>Alpha</li><li>Bravo</li><li>Charlie</li><li>Delta</li><li>Echo</li></ul>
+    </div>
+  </div>
+</div>
+
+<button id="both">▶ Run both together</button>
+
+<label id="ctrl"><input type="checkbox" id="counterOn"> stamp each rAF callback with an id (for external-camera analysis)</label>
+
+<div id="fc" hidden>
+  <div id="fcNum">000</div>
+  <div id="fcBits"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+</div>
+
+<div id="fps">click a card to measure</div>
+
+<script>
+  const cardA = document.getElementById('cardA');
+  const cardB = document.getElementById('cardB');
+  const fps   = document.getElementById('fps');
+  const fc    = document.getElementById('fc');
+  const fcNum = document.getElementById('fcNum');
+  const bits  = [...document.querySelectorAll('#fcBits i')];
+  const counterOn = document.getElementById('counterOn');
+
+  const hint = document.getElementById('hint');
+  const both = document.getElementById('both');
+  let comparisonValid = false;
+
+  // Card A only travels 300px if it can actually REACH max-width: 1000px. In a narrow window
+  // it is clipped: it travels less, card B still travels exactly 300px (a fixed translateX),
+  // and the A/B comparison is void. So test the real condition — how wide card A is ALLOWED
+  // to get — and DISABLE the comparative run rather than let it produce a misleading result.
+  // The single-card runs stay available: neither of them depends on the two motions matching.
+  function checkWidth() {
+    const avail = cardA.parentElement.clientWidth;      // the row card A is centred in
+    comparisonValid = avail >= 1000;
+    both.disabled = !comparisonValid;
+    both.style.opacity = comparisonValid ? '' : '.45';
+    both.style.cursor = comparisonValid ? '' : 'not-allowed';
+    hint.style.color = comparisonValid ? '' : '#b91c1c';
+    hint.innerHTML = comparisonValid
+      ? 'Both cards move their content <b>300px left, 600 ms, linear</b> — only the pipeline differs. '
+        + 'Click either, or run both.'
+      : `⚠️ <b>Window too narrow: card A can only reach ${avail} px, not 1000 px.</b> `
+        + `It would travel ${Math.round((avail - 400) / 2)} px while card B travels 300 px, so the two `
+        + `motions would no longer be equal. The A/B run is disabled until you widen the window.`;
+  }
+  checkWidth();
+  window.addEventListener('resize', checkWidth);
+
+  const runA = () => cardA.classList.toggle('wide');
+  const runB = () => cardB.classList.toggle('shifted');
+
+  cardA.addEventListener('click', () => { runA(); measureRaf(700); });
+  cardB.addEventListener('click', () => { runB(); measureRaf(700); });
+  both.addEventListener('click', () => {
+    if (!comparisonValid) return;                       // never run an invalid comparison
+    runA(); runB(); measureRaf(700);
+  });
+  counterOn.addEventListener('change', () => { fc.hidden = !counterOn.checked; });
+
+  // requestAnimationFrame CALLBACK cadence during the transition.
+  //
+  // This measures only the rate at which rAF callbacks arrive. It does NOT show that the
+  // visual state written by each callback was painted, composited, or presented — several
+  // DOM updates can be coalesced into a single paint. It reads a steady ~120 Hz with zero
+  // long callbacks in BOTH the irregular and the smooth state.
+  //
+  // With the checkbox on, every rAF callback also stamps a unique id on screen (decimal for
+  // the eye, 8-bit binary for a machine). Film the screen with an external high-speed camera
+  // (>= 240 fps): an id that appears in NO captured frame was not observed on the display by
+  // that measurement. It does not tell you at which pipeline stage it was lost.
+  function measureRaf(ms) {
+    const t0 = performance.now();
+    const stamps = [];
+    const stamp  = counterOn.checked;
+    let n = 0;
+
+    function tick(now) {
+      stamps.push(now);
+
+      if (stamp) {
+        n++;
+        fcNum.textContent = String(n).padStart(3, '0');
+        for (let b = 0; b < 8; b++) bits[b].classList.toggle('on', !!(n & (1 << (7 - b))));
+      }
+
+      if (now - t0 < ms) { requestAnimationFrame(tick); return; }
+
+      const iv   = stamps.slice(1).map((v, i) => v - stamps[i]);
+      const avg  = iv.reduce((a, b) => a + b, 0) / iv.length;
+      const max  = Math.max(...iv);
+      const long = iv.filter(v => v > 20).length;
+
+      fps.textContent =
+        `rAF callback rate ${(1000 / avg).toFixed(1)} Hz · avg ${avg.toFixed(1)} ms\n` +
+        `max ${max.toFixed(1)} ms · over 20 ms: ${long} · callbacks ${stamps.length}` +
+        (stamp ? `\nrAF ids issued 001..${String(n).padStart(3, '0')}` : '');
+    }
+    requestAnimationFrame(tick);
+  }
+</script>

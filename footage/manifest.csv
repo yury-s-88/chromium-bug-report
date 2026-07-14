@@ -1,0 +1,4 @@
+video,camera_frames,container_fps,width,height,byte_identical_consecutive_frames,runs_detected,runs_240fps_ok,runs_rejected_ramp,usable_240fps_frames
+IMG_3832.mov,1379,30,1920,1080,0,6,4,2,233-1175
+IMG_3833.mov,790,30,1920,1080,0,4,2,2,124-551
+IMG_3836.mov,2317,30,1920,1080,0,11,9,2,184-2242

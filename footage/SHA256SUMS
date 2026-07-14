@@ -1,0 +1,5 @@
+# SHA-256 of the published raw 240 fps footage (Google Drive link in README.md)
+# Verify with:  shasum -a 256 -c SHA256SUMS
+8c19b8d2bfd14d0351f2ec770aed43860cf161470c1a01973e617186204c3858  IMG_3832.mov
+f6829cb8c63c75ea360bc11fad72affc9e7764f6498081550b7e48ad7188cf40  IMG_3833.mov
+b2089cdd9cfbda181663774540a751b18f4ddbc61e42f6ed22ff41944a3335b9  IMG_3836.mov

@@ -1,0 +1,22 @@
+video,sha256_prefix,run,first_cam_frame,last_cam_frame,cam_frames,devtools,frame_stamp,what_animated,sampling,adv_per_cam_frame,est_cam_fps,notes
+IMG_3832.mov,8c19b8d2,1,31,115,85,closed,on,both,REJECTED-ramp,0.928,129,"only 85 cam frames; a 600ms animation spans ~144 at 240fps — slow-motion speed ramp, excluded from both measurements"
+IMG_3832.mov,8c19b8d2,2,233,387,155,closed,on,both,240fps-OK,0.517,232,
+IMG_3832.mov,8c19b8d2,3,479,633,155,closed,on,both,240fps-OK,0.527,228,
+IMG_3832.mov,8c19b8d2,4,751,905,155,closed,on,both,240fps-OK,0.497,242,
+IMG_3832.mov,8c19b8d2,5,1021,1175,155,closed,on,both,240fps-OK,0.544,220,
+IMG_3832.mov,8c19b8d2,6,1289,1356,68,closed,on,both,REJECTED-ramp,1.349,89,"only 68 cam frames; a 600ms animation spans ~144 at 240fps — slow-motion speed ramp, excluded from both measurements"
+IMG_3833.mov,f6829cb8,1,4,34,31,open,on,both,REJECTED-ramp,2.828,42,"only 31 cam frames; a 600ms animation spans ~144 at 240fps — slow-motion speed ramp, excluded from both measurements"
+IMG_3833.mov,f6829cb8,2,124,278,155,open,on,both,240fps-OK,0.49,245,
+IMG_3833.mov,f6829cb8,3,397,551,155,open,on,both,240fps-OK,0.49,245,
+IMG_3833.mov,f6829cb8,4,667,776,110,open,on,both,REJECTED-ramp,0.778,154,"only 110 cam frames; a 600ms animation spans ~144 at 240fps — slow-motion speed ramp, excluded from both measurements"
+IMG_3836.mov,b2089cdd,1,12,83,72,closed,off,both,REJECTED-ramp,,,"only 72 cam frames; a 600ms animation spans ~144 at 240fps — slow-motion speed ramp, excluded from both measurements"
+IMG_3836.mov,b2089cdd,2,184,338,155,closed,off,both,240fps-OK,,,
+IMG_3836.mov,b2089cdd,3,456,606,151,closed,off,B-alone,240fps-OK,,,
+IMG_3836.mov,b2089cdd,4,708,858,151,closed,off,B-alone,240fps-OK,,,
+IMG_3836.mov,b2089cdd,5,937,1089,153,closed,off,B-alone,240fps-OK,,,
+IMG_3836.mov,b2089cdd,6,1174,1324,151,closed,off,B-alone,240fps-OK,,,
+IMG_3836.mov,b2089cdd,7,1384,1538,155,closed,off,A-alone,240fps-OK,,,
+IMG_3836.mov,b2089cdd,8,1614,1766,153,closed,off,A-alone,240fps-OK,,,
+IMG_3836.mov,b2089cdd,9,1846,2000,155,closed,off,A-alone,240fps-OK,,,
+IMG_3836.mov,b2089cdd,10,2090,2242,153,closed,off,A-alone,240fps-OK,,,
+IMG_3836.mov,b2089cdd,11,2253,2317,65,closed,off,none,REJECTED-ramp,,,"only 65 cam frames; a 600ms animation spans ~144 at 240fps — slow-motion speed ramp, excluded from both measurements"

@@ -1,0 +1,5 @@
+run,condition,card,first_cam_frame,last_cam_frame,travel_px,step_per_refresh_px,holds,pct_hold_1_refresh,pct_hold_2plus_refresh,max_hold_cam_frames
+1,both,A,124,278,450.6,6.26,72,98.6,1.4,6
+1,both,B,124,278,454.1,6.31,72,98.6,1.4,6
+2,both,A,397,551,450.5,6.26,70,95.7,4.3,6
+2,both,B,397,551,451.1,6.27,70,95.7,4.3,6
