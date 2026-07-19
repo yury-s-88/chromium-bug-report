@@ -899,12 +899,43 @@ ProMotion. If there are instances where Chrome does not correctly support it, **
 new bugs**."* — the maintainer explicitly inviting a report shaped like this one. **The live bug to
 reference is 330771325**, not the umbrella.
 
-**Named but not checked: issue 40820525** *("ProMotion support is broken")*. It was on this
-investigation's own list and has **not** been read — it was not among the snapshots available, and
-`issues.chromium.org` returns only a sign-in page to an unauthenticated fetch. Nothing in §7 rests on it
-(the entire "why" rests on public Gerrit CLs), but it is the one named source left unopened, and from its
-title it may duplicate or corroborate this report's own upstream bug **534417001**. **Recorded as an open
-gap, not silently dropped.**
+**Issue 40820525 — read, and it is a *different* bug.** *("Promotion (high refresh rate) support is
+broken"; snapshot 2026-07-19.)* Filed **2022-02-05** against **Chrome 98**, component **Blink > Scroll**,
+**P3 / S4, status New**, no assignee, no linked code changes; 19 comments, nothing substantive since
+2022-03-07. Reported symptom: *"Scrolling is less fluid than expected, and **locked to 60 Hz. UFO Test
+reports a 60 Hz display.** Manually **resizing the window** makes scrolling smoother again."*
+
+| | **40820525** (2022) | **this report** |
+|---|---|---|
+| what is at 60 Hz | **the display, as Chrome sees it** — `testufo.com` reports a 60 Hz panel | **nothing is**: rAF holds a measured ~120 Hz (README), and vsync source → BeginFrame → `SwapBuffers` are clean ~120 Hz in the trace (§1) |
+| nature of the failure | **rate selection** — Chrome chose the wrong refresh interval | **commit phase** — correct rate, wrong moment relative to the ~1.5 ms latch deadline (§5a) |
+| workaround | **resize the window** (temporarily) | untested for this bug — see next steps |
+| status | stale since 2022, P3, wrong component | — |
+
+**Its era is also gone.** The Chrome 98 regression was tracked as crbug **1274172** with a fix landing in
+Canary (CL 3488608, see 40202100 #49/#51), and #16 confirms *"the canary version fix this bug"* (2022-03-07).
+The `DelayBasedBeginFrameSource` machinery it lived in was then replaced by `CVDisplayLinkBeginFrameSource`
+(2023-11), whose flag was deleted as permanently-on in 2025 (CL 6192599). **That machinery does not exist in
+the reproduced build.**
+
+*(One shared observation, quoted only to be discounted: commenters #12/#14 report that disabling hardware
+acceleration fixes theirs, superficially echoing §4. It is weak evidence of anything — disabling HW
+acceleration replaces the *entire* present path and would "fix" almost any GPU-present problem. **Not**
+treated as corroboration.)*
+
+**So it is neither a duplicate nor corroboration — but it is an actionable triage risk.** A triager
+pattern-matching on "ProMotion broken on macOS" could fold this report into a **stale P3 sitting in a
+component that owns none of the code involved**, where it has gone untouched for four years. The upstream
+comment should pre-empt that in as many words: *this is not 40820525 — rAF and the vsync source are measured
+at ~120 Hz here; the loss is in the present **commit phase**, below `SwapBuffers`.*
+
+**And it hands us the component argument.** 40820525 stalled partly because **Blink > Scroll** owns none of
+this code. The live workstream sits in **Internals > GPU > Internals** (40062488, 345275139), and the flag's
+own bug 330771325 in **Internals**; the fix target here is
+`gpu/ipc/service/image_transport_surface_overlay_mac.mm` + `components/viz/common/features.cc`. **Requesting
+`Internals > GPU > Internals` on 534417001 puts it in front of the people who wrote
+`kVSyncAlignedPresentation`** — a concrete answer to the standing "propose a component to speed up triage"
+item.
 
 **§5a was stated by a Chromium graphics lead in 2021.** ccameron, 40202100 #12 (2021-10-20):
 
@@ -1141,6 +1172,20 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
     Ask instead for a **display-refresh-rate-segmented re-evaluation** of the general path — the loss is
     severe at 120 Hz and near-absent at 60 Hz (§3), so a Mac-wide arm dilutes the benefit while the latency
     cost applies uniformly.
+- **Two actions that came out of reading 40820525 (§7h), both cheap:**
+  1. **Ask for component `Internals > GPU > Internals` on 534417001.** It is where the live workstream sits
+     (40062488, 345275139) and where the flag's own bug 330771325 lives; 40820525 has sat in **Blink >
+     Scroll** — which owns none of this code — untouched since 2022. Concrete answer to the standing
+     "propose a component to speed triage" item.
+  2. **State the non-duplication up front in the upstream comment.** *"Not 40820525: rAF and the vsync
+     source are measured at ~120 Hz here; the loss is present-**phase**, below `SwapBuffers`."* Without it,
+     a triager pattern-matching on "ProMotion broken on macOS" may dedupe this into that stale P3.
+- **Cheap discriminator, ~1 minute, not yet run: does *resizing the window* suppress this bug?** It is
+  40820525's workaround, so a **negative** result is a clean extra separation from it; a **positive** one
+  would be a new suppressor (#5) and would need explaining. Either outcome is worth having before filing the
+  comparison. *(The source dive on the DevTools-suppression question already found the resize →
+  `CATransactionV2 createFencePort` path is one-time and feature-gated, so a positive result would* not
+  *have an obvious readable mechanism.)*
 - **§7g is done** — hardened on the passive `Jank3` counter (scrolling 0.11 / 94.4 % at zero vs
   not-scrolling 12.44 / 0 %, disjoint distributions, both landing on published references). Two optional
   tighteners remain, neither load-bearing: a **reversed-order repeat** (unscrolled first) to exclude drift,
