@@ -50,6 +50,15 @@
   its own — and it is inert unless scrolled, so it does not affect any other mode.
   Full rationale and the falsification condition: diagnostic-findings.md §7g.
 
+  THE WIDTH GUARD, AND THE RESIZE DISCRIMINATOR
+  ─────────────────────────────────────────────
+  A + B needs ≥ 1000 px of width or card A cannot travel as far as card B and the comparison is void.
+  The guard NEVER switches your selected mode (it used to, including mid-run — see the comment on
+  checkWidth); it holds the mode, blocks Fire/Loop, and ABORTS a run the resize invalidated, loudly.
+  So when running the "does a window resize suppress this bug?" discriminator (diagnostic-findings.md,
+  Next candidate steps), resize BETWEEN TWO WIDTHS THAT ARE BOTH ≥ 1000 px — e.g. drag 1600 → 1200 px.
+  Any size change at all is enough for the effect being tested; crossing the guard is not.
+
   Note on the numbers this is chasing: the README's "54–59%" is the fraction of hold EVENTS that
   are single-interval, not a duty cycle.  Computed from intervals consumed, the effective visible
   cadence is ≈115 Hz for B alone falling to ≈78 Hz beside the layout animation — irregular, NOT a
@@ -282,24 +291,44 @@
 
   // ── width guard (same reasoning as index.html) ────────────────────────────────────────────
   // Card A only travels 300px if it can reach max-width:1000px; in a narrow window the A/B
-  // comparison is void. Disable ONLY the modes where A's travel must equal B's (combined).
-  let comparisonValid = false;
+  // comparison is void, so modes needing A's travel to equal B's (combined) are held back.
+  //
+  // IT MUST NOT SILENTLY SWITCH THE SELECTED MODE — and it used to.  The old guard re-checked
+  // the "B transform only" radio whenever the window fell under the threshold.  A `disabled`
+  // radio still accepts a programmatic `.checked`, so this fired MID-RUN too: a Loop started in
+  // A+B would quietly carry on as B-alone, and `runWindow()` re-reads mode() every window, so
+  // the `performance.mark` tag changed with it.  That yields a wrong-mode run LABELLED as the
+  // right one — the one failure this harness must never produce.  (It also made the §7h resize
+  // discriminator impossible to run at all.)
+  //
+  // Now: the selection is never touched.  A resize that invalidates the *running* mode ABORTS
+  // the run and says so; when the window is wide again the original mode is still selected.
+  let comparisonValid = false, narrowAbort = false;
   function checkWidth() {
-    const avail = cardA.parentElement.clientWidth;
-    comparisonValid = avail >= 1000;
-    document.querySelector('input[value=combined]').disabled = !comparisonValid;
-    if (mode() === 'combined' && !comparisonValid) {
-      document.querySelector('input[value=transform]').checked = true;
+    comparisonValid = cardA.parentElement.clientWidth >= 1000;
+    if (!comparisonValid && MODES[mode()].needsWide && busyRun) {
+      narrowAbort = true;      // never let a run continue in a mode the window cannot hold
+      stopAll();
     }
+    setRunning(busyRun);       // refresh disabled states for the new width
     describe();
   }
   function describe() {
     const m = MODES[mode()];
-    what.textContent = m.desc + (m.needsWide && !comparisonValid
-      ? '  ⚠️ window too narrow: card A cannot reach 1000px, comparison disabled — widen the window.' : '');
+    let msg = m.desc;
+    if (m.needsWide && !comparisonValid) {
+      msg += '  ⚠️ window too narrow: card A cannot reach 1000px, so this mode is ON HOLD — widen the'
+           + ' window. Your selection is kept, not switched.';
+    }
+    if (narrowAbort) {
+      msg += '  ⛔ THE RUN IN PROGRESS WAS ABORTED by that resize — discard it and start again once the'
+           + ' window is wide enough.';
+    }
+    what.textContent = msg;
   }
   window.addEventListener('resize', checkWidth);
-  document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', describe));
+  document.querySelectorAll('input[name=mode]').forEach(
+    r => r.addEventListener('change', () => { narrowAbort = false; setRunning(busyRun); describe(); }));
   stampOn.addEventListener('change', () => { fc.hidden = !stampOn.checked; });
 
   // ── run engine ─────────────────────────────────────────────────────────────────────────────
@@ -356,15 +385,20 @@
 
   function setRunning(on) {
     busyRun = on;
-    fireBtn.disabled = on; loopBtn.disabled = on; stopBtn.disabled = !on;
+    // Fire/Loop are blocked — rather than the mode being switched — when the selected mode needs
+    // more width than the window has. The selection survives; only the ability to start does not.
+    const blocked = MODES[mode()].needsWide && !comparisonValid;
+    fireBtn.disabled = on || blocked;
+    loopBtn.disabled = on || blocked;
+    stopBtn.disabled = !on;
     document.querySelectorAll('input[name=mode]').forEach(r => {
       r.disabled = on || (r.value === 'combined' && !comparisonValid);
     });
   }
   function stopAll() { looping = false; stopRequested = true; clearTimeout(loopTimer); setRunning(false); }
 
-  fireBtn.addEventListener('click', () => { if (busyRun) return; looping = false; stopRequested = false; setRunning(true); runWindow(); });
-  loopBtn.addEventListener('click', () => { if (busyRun) return; looping = true;  stopRequested = false; setRunning(true); runWindow(); });
+  fireBtn.addEventListener('click', () => { if (busyRun) return; narrowAbort = false; looping = false; stopRequested = false; setRunning(true); runWindow(); });
+  loopBtn.addEventListener('click', () => { if (busyRun) return; narrowAbort = false; looping = true;  stopRequested = false; setRunning(true); runWindow(); });
   stopBtn.addEventListener('click', stopAll);
 
   checkWidth();

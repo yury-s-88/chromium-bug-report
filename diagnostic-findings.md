@@ -1186,6 +1186,13 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   comparison. *(The source dive on the DevTools-suppression question already found the resize →
   `CATransactionV2 createFencePort` path is one-time and feature-gated, so a positive result would* not
   *have an obvious readable mechanism.)*
+  **Run it between two widths that are both ≥ 1000 px** (e.g. 1600 → 1200): below that, `diagnostic.html`'s
+  A+B width guard trips. Any size change at all is enough for the effect under test. *(The guard was fixed
+  for this: it previously re-checked the "B transform only" radio on every drop below the threshold —
+  **including mid-run**, since a `disabled` radio still accepts a programmatic `.checked`. A Loop started in
+  A+B would have continued as B-alone while `runWindow()`'s `performance.mark` tag followed the switch: a
+  wrong-mode run labelled as the right one. It now holds the selection, blocks Fire/Loop, and aborts an
+  invalidated run with an on-screen notice.)*
 - **§7g is done** — hardened on the passive `Jank3` counter (scrolling 0.11 / 94.4 % at zero vs
   not-scrolling 12.44 / 0 %, disjoint distributions, both landing on published references). Two optional
   tighteners remain, neither load-bearing: a **reversed-order repeat** (unscrolled first) to exclude drift,
