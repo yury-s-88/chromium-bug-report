@@ -67,7 +67,9 @@ launch-to-launch variance cancels.
 Two clean populations, no intermediate cases. The bug baseline is replicated **three** times (11.45 / 12.44 /
 12.96, all ≤ 1.3 % at zero), which is what makes the two fixed readings unambiguous rather than single-run.
 The resize row is a deliberate **negative control**: it is issue 40820525's workaround, and it does nothing
-here — one more separation between that bug and this one.
+here — one more separation between that bug and this one. Its protocol was **near-continuous resizing
+throughout the run** (several drags per 600 ms animation cycle; not counted), which rules out a fix that
+appears on resize and then decays — and is stricter than 40820525 needs, where one resize held for minutes.
 
 **Caveat:** this does not isolate *which* branch of `Present()` aligned the commit — the predicted
 `IsVSyncAlignedForScrolling() && is_handling_interaction`, or the separate `NumPendingSwaps() > 1` clause

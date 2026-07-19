@@ -944,10 +944,17 @@ n = 16) and 12.96 (here, n = 81 — the largest of the three), all with ≤ 1.3 
 tightens §7g: scrolling's **0.11 / 94.4 %** is off a *thrice-replicated* distribution, not off a single
 reference run.
 
-**One thing not yet recorded: the resize protocol** — how many resizes, and where they fell inside the
-monitored window, is not in the dump. 40820525's own reporters describe their effect as persisting *"until I
-quit and relaunch"* (#1) and for at least minutes (#54), so a single resize would have sufficed to show it
-and a purely transient effect is not a plausible escape. Worth pinning down before this is quoted upstream.
+**Protocol, as reported by the operator:** the window was resized **repeatedly — several times per animation
+cycle, effectively continuously throughout the run**. The count was not instrumented and none is claimed;
+what is claimed is the *density*, which is the part that matters. That **closes the transient-effect escape
+by construction** — there was no stretch longer than a fraction of one 600 ms cycle without a resize, so a
+fix that decays has nowhere to hide. It is also a **stricter** test than 40820525 needs: there a *single*
+resize held *"until I quit and relaunch"* (#1), and for minutes at a time (#54).
+
+*(Aside, offered as consistency and explicitly not as a dose-response: continuous resizing adds real layout,
+raster and IOSurface work, which by §2's trigger should push the bug **worse**, not better — and 12.96 is
+indeed the highest of the three bug baselines. The spread across 11.45 / 12.44 / 12.96 is small and no weight
+is placed on the ordering.)*
 
 *(One shared observation, quoted only to be discounted: commenters #12/#14 report that disabling hardware
 acceleration fixes theirs, superficially echoing §4. It is weak evidence of anything — disabling HW
@@ -1211,9 +1218,9 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   2. **State the non-duplication up front in the upstream comment.** *"Not 40820525: rAF and the vsync
      source are measured at ~120 Hz here; the loss is present-**phase**, below `SwapBuffers`."* Without it,
      a triager pattern-matching on "ProMotion broken on macOS" may dedupe this into that stale P3.
-- **Resize discriminator: DONE, clean negative** (§7h) — resizing does not suppress this bug (12.96, 0 % at
-  zero, squarely the bug population). Only loose end: **record the exact resize protocol** (how many, and
-  where in the monitored window) before quoting it upstream.
+- **Resize discriminator: DONE and closed** (§7h) — resizing does not suppress this bug (12.96, 0 % at zero,
+  squarely the bug population), under near-continuous resizing throughout the run, so a decaying fix cannot
+  hide in the gaps.
 - **§7g is done** — hardened on the passive `Jank3` counter (scrolling 0.11 / 94.4 % at zero vs
   not-scrolling 12.44 / 0 %, disjoint distributions, both landing on published references). Two optional
   tighteners remain, neither load-bearing: a **reversed-order repeat** (unscrolled first) to exclude drift,
