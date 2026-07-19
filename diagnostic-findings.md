@@ -676,7 +676,11 @@ repro is squarely inside `is_handling_animation`: card A is `kMainThreadAnimatio
    or an in-progress touch sequence**, nothing else. And INP by definition measures only **click, tap and
    keypress**; [scrolling is explicitly excluded](https://web.dev/articles/inp). So the shipped design
    aligns precisely the frames INP cannot charge it for. That is coherent engineering — and it explains
-   the shape of the gap rather than treating it as an oversight.
+   the shape of the gap rather than treating it as an oversight. **But it has a user-visible cost the
+   experiment's metrics would not have named** (§7g, confirmed by eye on stock Chrome): the *same*
+   animation presents at a true ~120 Hz while a scroll is in progress and drops back to the ~55 Hz pin the
+   instant the gesture ends. The gate does not just withhold a fix — it hands it out and takes it back
+   mid-animation.
 
 2. **The benefit is display-rate-dependent, so a Mac-wide aggregate dilutes it.** §3 measured the same
    animation at ~52 % held on a 120 Hz ProMotion panel versus 8–16 % at a fixed 60 Hz — i.e. the loss this
@@ -691,7 +695,7 @@ repro is squarely inside `is_handling_animation`: card A is `kMainThreadAnimatio
    hops from the commit/callback path "to avoid unnecessary delays" — after the 2025 experiment. So the
    measured cost of alignment today is not necessarily the cost that lost in 2025. *(Inferred.)*
 
-### 7g. A free falsifiable prediction this history hands us *(predicted — no build, no camera, no flag)*
+### 7g. A free falsifiable prediction — **PREDICTION HOLDS** *(visually observed; no build, no camera, no flag)*
 
 `kVSyncAlignedPresentationForScrolling` is **on by default** and gates on `data.is_handling_interaction`,
 which is true while the page is **actively being scrolled**. The commit path taken during a scroll is
@@ -722,11 +726,47 @@ main-thread and compositor work, which by §2's trigger should make card B **wor
 in the present path, `data.is_handling_interaction`. *(Remaining caveat: a scroll also changes what the
 compositor is doing more broadly; this is a strong hint, not a single-variable experiment like §5f.)*
 
-If it holds, it is a **fourth independent confirmation of the mechanism that requires nothing but stock
-Chrome** — and the strongest possible framing for the upstream report: *Chrome's own shipped code already
-fixes this animation, but only while you happen to be scrolling.* If it does **not** hold, the
-commit-phase story needs re-examination (or `is_handling_interaction` is not set as read). Either way it
-is a ~1-minute test. **Not yet run.**
+> **RESULT — PREDICTION HOLDS** *(visually observed, 2026-07-19).* Stock Chrome, no flags, A+B on Loop:
+> **card B is smooth while the scroll gesture is in progress.** Predicted from source *before* the test,
+> as in §5d.
+
+**What this buys — and the honest limit.** On the report's own scale this is **visually observed**, and
+"smooth by eye" is this report's declared **suppressor signature** (§5d) — so it does *not* yet stand
+where §5f's camera pair stands. What separates it from suppressors #1–#3 (DevTools / recorder / CDP) is
+the same thing that separated the flag:
+
+- **It is not an observation channel.** Nothing is capturing the screen. Scrolling is an *input to the
+  rendering path*, and there is a **source-readable branch** that predicts this exact result:
+  `delay_presentation_until_next_vsync = … || (IsVSyncAlignedForScrolling() && data.is_handling_interaction)`
+  with the feature `ENABLED_BY_DEFAULT`. The prediction was made from that line before the test.
+- **The confound runs the wrong way.** Scrolling *adds* compositor and main-thread work, which by §2's
+  trigger should make card B **worse**. "Smooth while scrolling" cannot be explained by reduced load.
+- **It reaches the same code as the flag.** Both set the same boolean in the same `Present()`; the flag
+  sets it unconditionally, the scroll sets it for the duration of the gesture. So this is not a new
+  mechanism — it is the §5d/§5f mechanism, reached through Chrome's own shipped gate.
+
+**Residual caveat, stated plainly:** a scroll changes more than one thing about what the compositor is
+doing, so this is a **strong corroboration, not a single-variable experiment** like §5f. And macOS itself
+may behave differently during a scroll (the standing worry from the ScreenCaptureKit suppressor, which
+touches zero Chrome code yet suppresses). The difference here is that we have a **readable branch that
+predicts it** and the recorder case did not. **→ Hardening step, ~2 minutes, no camera: re-run the §6
+`chrome://histograms` read while scrolling continuously** — if
+`Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation` collapses from the default ~11.5 towards
+the flag's ~0.1, the result is confirmed on a **passive, non-suppressing counter**, on the same axis and
+against the same published reference numbers as the flag. Until then §7g stays *visually observed*.
+
+**Three things it already establishes:**
+
+1. **A fourth confirmation path that needs nothing but stock Chrome** — no flag, no camera, no build, no
+   footage. A reviewer with a ProMotion Mac can see the bug *and* Chrome's own fix for it in one minute.
+2. **The sharpest possible upstream framing:** *Chrome's shipped code already fixes this animation — but
+   only while the user happens to be scrolling.* Stated as a defect in its own right: the **same
+   animation presents at a true ~120 Hz during a scroll and falls back to the ~55 Hz pin the instant the
+   gesture ends** — a user-visible cadence discontinuity produced by the feature gate itself, not by
+   anything the page did.
+3. **Part of why this went unreported.** Scrolling is the most common thing a user does on a page, and it
+   silently repairs the cadence for its duration — so the degradation is easiest to see exactly where
+   people look least: a static page left alone to animate.
 
 ---
 
@@ -770,6 +810,15 @@ is a ~1-minute test. **Not yet run.**
   "new feature, not yet run" as much as "parked after the 2025 verdict" (§7a-ii; not disambiguated by any
   public CL). Either way the gap is a **deliberate, measured trade-off**, not an oversight — which is why the
   upstream ask must be a *scoped re-evaluation*, not "flip the flag" (§7f).
+- **Chrome's own shipped gate reaches the fix — but only during a scroll** *(source-readable + visually
+  observed, §7g)*. `kVSyncAlignedPresentationForScrolling` is `ENABLED_BY_DEFAULT` and sets the *same*
+  `delay_presentation_until_next_vsync` boolean when `data.is_handling_interaction`
+  (= active scroll or touch sequence, `LayerTreeHostImpl::IsHandlingInteraction()`). Predicted from that
+  line, then confirmed by eye on **stock Chrome with no flags**: card B is **smooth while a scroll gesture
+  is in progress**. So the same animation presents at a true ~120 Hz during a scroll and falls back to the
+  ~55 Hz pin the moment it ends. *(By-eye tier — the report's suppressor signature — but not an observation
+  channel, and the confound adds work rather than removing it; hardening on the passive `Jank3` counter is
+  the named next step.)*
 
 **Open**
 - **Fix vs suppressor #4 — RESOLVED for A+B (card B *and* card A)** *(§5f)*. The camera pair confirms the fix
@@ -855,11 +904,14 @@ is a ~1-minute test. **Not yet run.**
     Ask instead for a **display-refresh-rate-segmented re-evaluation** of the general path — the loss is
     severe at 120 Hz and near-absent at 60 Hz (§3), so a Mac-wide arm dilutes the benefit while the latency
     cost applies uniformly.
-- **Run the §7g free prediction first** *(1 minute, stock Chrome, no flags, no camera)*: on a scrollable page,
-  card B should go **smooth while a scroll gesture is in progress** (the shipped `…ForScrolling` flag routes
-  those frames through the same vsync-aligned commit) and revert to jerky when the scroll stops. If it holds
-  it is a **fourth independent confirmation using only stock Chrome**, and the sharpest possible framing for
-  the upstream report.
+- **Harden §7g on a passive counter** *(~2 minutes, no camera, no flag)* — the §7g scroll prediction **holds
+  by eye**; promote it off the by-eye tier the same way §6 did for the flag: `chrome://histograms` →
+  *Monitoring Mode* → A+B on Loop while **scrolling the §7g box continuously** ~20 s → read
+  `Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation`. Reference points already published:
+  **default ≈ 11.5**, **flag ≈ 0.1**. A collapse towards the flag's value confirms it on a non-suppressing
+  channel. *(Watch for the null case: if scrolling changes which sequence trackers are active and the
+  histogram comes back empty, report that rather than reading a partial bucket.)* Then, optionally, the
+  same clip structure as §3 on camera — jerky / scroll / jerky in **one** clip is self-validating.
 - **Optional: complete cycle 2** (busywork + color under the flag, a few clean fires each) to extend the
   confirmation beyond A+B to the other bug conditions. Not required for the core claim.
 - **Passive histogram** `Gpu.Mac.BackpressureUs` on the buggy default run — excludes the backpressure poll.
