@@ -489,6 +489,46 @@ so re-aligning that commit fixes both. The earlier "flag fixes only the composit
 
 ---
 
+## 6. Camera-free confirmation via Chrome's own telemetry — "jank, not dropped frames" *(passive built-in metric)*
+
+The bug and the fix are both confirmable **without a camera**, using Chrome's own smoothness telemetry —
+which, being a **passive counter read** (not a screen capture), does **not** suppress the way DevTools /
+ScreenCaptureKit / CDP do. `chrome://histograms`, A+B repro, DevTools closed, on the reproduced build:
+
+| `Graphics.Smoothness.*.CompositorThread.CompositorAnimation` (card B) | default | + `VSyncAlignedPresentation` |
+|---|---:|---:|
+| **`Jank3`** (mean) | **11.5** (spread 0–14+, long tail) | **0.1** (90.6 % at zero) |
+| **`PercentDroppedFrames3`** (mean) | **0.0** (100 % of samples at zero) | 0.0 |
+| `Checkerboarding3/4` (mean) | 0.0 | 0.0 |
+
+**Three things this establishes:**
+
+1. **Camera-free confirmation of the fix.** Chrome's own jank metric collapses **11.5 → 0.1** with the flag
+   — independent corroboration of the camera pair (§5f: card-B hold=2 60 % → 87 %). No camera, no build, no
+   screen capture.
+2. **The bug is *jank* (uneven cadence), not *dropped frames*** — from Chrome's own accounting:
+   `PercentDroppedFrames = 0` throughout (the states *do* reach the display, just held/late, then jump
+   proportionally), while `Jank3` is high on default. This is the report's careful wording ("rAF states not
+   observed", never "*rendered frames that were dropped*") confirmed by Chromium's internal counters.
+3. **Why it hid in plain sight.** Standard smoothness monitoring — the DevTools FPS meter, "dropped frames"
+   dashboards — watches `PercentDroppedFrames`, which reads **0** here. Only the *jank* metric catches it, so
+   even Chrome's own default-facing telemetry reports "no dropped frames" while the animation is visibly janky.
+
+**Reproduce in ~2 minutes (a reviewer needs no footage):** `chrome://histograms` → *Switch to Monitoring
+Mode* → run A+B (Loop, DevTools closed) ~20 s → *Refresh* → read
+`Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation` (≈ 11). Relaunch with
+`--user-data-dir=/tmp/x --enable-features=VSyncAlignedPresentation`, repeat (≈ 0).
+
+**Caveat (evidence standard).** `Jank3` is computed from Chrome's **present estimate** (the feedback
+timestamp is `GetDisplaytime`, not the real WindowServer present), so it **under-reports magnitude** vs the
+external camera (11.5 vs the camera's ~50 % held) — it captures the commit-phase unevenness Chrome *models*,
+which is exactly why the flag (which regularises that phase) drives it to ~0. The **direction** (default ≫
+flag) is unambiguous and agrees with every other channel; the **absolute** ground truth stays the camera.
+This also partly answers §1's open "does tracing suppress?": this passive counter does **not**, and it shows
+the bug — so the loss is real and on-machine-measurable, just not through a *capture* channel.
+
+---
+
 ## What is resolved / still open
 
 **Resolved**

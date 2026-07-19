@@ -48,10 +48,24 @@ measurements — localised the cause and confirmed a fix. Details and per-claim 
 * **Camera confirmation.** A fixed-camera *default-vs-flag* pair confirmed the flag restores the near-120 Hz
   cadence for **both** the compositor (`transform`) and the layout (`max-width`) animation.
 
-> These follow-up camera clips are **not published** — they are trivially reproducible (an iPhone in
+* **Confirmable with no camera at all — via Chrome's own telemetry — and it says "jank, not dropped
+  frames".** `chrome://histograms/Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation` is a
+  **passive internal metric that does *not* suppress** (unlike DevTools / a recorder / CDP, which capture
+  the screen). Running the A+B repro (DevTools closed): mean **Jank3 ≈ 11.5 on default → ≈ 0.1 with the
+  flag** (90 % of sequences at zero), while `Graphics.Smoothness.PercentDroppedFrames3` reads **0
+  throughout**. So **Chrome's own data confirms both the bug and the fix**, and confirms the precise
+  framing below: the states are **janky (held, uneven cadence), not dropped** — which is exactly why
+  standard *dropped-frame* monitoring (and the DevTools FPS meter) shows "0, looks fine" and misses it. A
+  reviewer can reproduce this in **~2 minutes with no footage**: `chrome://histograms` → run A+B → note
+  Jank3; relaunch `--enable-features=VSyncAlignedPresentation` → note it again. *(Caveat: Jank3 is built
+  from Chrome's present **estimate**, so it under-reports magnitude vs the external camera's ~50 % held —
+  but the default→flag direction is unambiguous.)*
+
+> The follow-up **camera** clips are **not published** — they are trivially reproducible (an iPhone in
 > slow-motion plus the flag). Their numbers are follow-up detail, **not** the headline re-derivable
-> measurements below, which remain those from the three published clips. The one claim here that needs no
-> footage at all is the flag test itself: **enable the flag, and the bug disappears.**
+> measurements below, which remain those from the three published clips. But note the two claims that need
+> **no footage at all**: the flag test itself (**enable the flag, and the bug disappears**), and the
+> passive `Jank3` histogram above (**11.5 → 0.1**).
 
 Likely the same area as Chromium's in-progress ProMotion present work
 ([crbug 40202100](https://issues.chromium.org/issues/40202100)).
