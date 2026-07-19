@@ -1,0 +1,5 @@
+- Histogram: Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation recorded 32 samples, mean = 0.1 (flags = 0x41) [#]
+
+0  -----------------------------O                                            (29 = 90.6%)
+1  ---O                                                                      (3 = 9.4%) {90.6%}
+2  ... 

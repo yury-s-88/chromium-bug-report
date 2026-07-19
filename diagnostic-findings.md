@@ -519,6 +519,10 @@ Mode* → run A+B (Loop, DevTools closed) ~20 s → *Refresh* → read
 `Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation` (≈ 11). Relaunch with
 `--user-data-dir=/tmp/x --enable-features=VSyncAlignedPresentation`, repeat (≈ 0).
 
+**Raw dumps** of these three reads (verbatim `chrome://histograms`) are committed under
+[`telemetry/`](telemetry/) — the default-vs-flag `Jank3` pair plus the full `Graphics.Smoothness` default
+capture that shows `PercentDroppedFrames = 0` alongside the jank.
+
 **Caveat (evidence standard).** `Jank3` is computed from Chrome's **present estimate** (the feedback
 timestamp is `GetDisplaytime`, not the real WindowServer present), so it **under-reports magnitude** vs the
 external camera (11.5 vs the camera's ~50 % held) — it captures the commit-phase unevenness Chrome *models*,
