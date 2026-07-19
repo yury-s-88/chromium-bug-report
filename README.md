@@ -54,8 +54,11 @@ measurements — localised the cause and confirmed a fix. Details and per-claim 
   | *reference: with the flag (above)* | 32 | *0.1* | *90.6 %* |
 
   **Scrolling lands on the flag's number; not scrolling lands on the default's**, with completely disjoint
-  distributions (scrolled ≤ 2, unscrolled ≥ 8). Card A behaves identically. So the same animation presents
-  at a true ~120 Hz during a scroll and falls back to the ~55 Hz pin the instant the gesture ends — a
+  distributions (scrolled ≤ 2, unscrolled ≥ 8). Read it in two parts, because neither half carries it alone:
+  the histogram shows that **scrolling engages the same vsync-aligned commit path the flag forces**, and the
+  **camera** (above) shows that **that path is a real ~120 Hz fix**, not a metric artefact or a regularised
+  60 Hz — the same arrangement the flag's own Jank3 numbers already have. So the same animation presents at
+  a true ~120 Hz during a scroll and falls back to the ~55 Hz pin the instant the gesture ends — a
   user-visible cadence discontinuity produced by the feature gate itself. **This is the cheapest way for a
   reviewer to see both the bug and Chrome's own fix for it: no flag, no footage, about a minute.** Raw dumps
   in [`telemetry/`](telemetry/); method, the subtraction that yields the unscrolled arm, and the full caveat

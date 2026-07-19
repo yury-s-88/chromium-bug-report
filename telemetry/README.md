@@ -31,8 +31,19 @@ measured:
 | *reference: `VSyncAlignedPresentation` flag* | 32 | *0.1* | *90.6 %* |
 
 Scrolling lands on the **flag's** number; not scrolling lands on the **default's**. The distributions are
-**completely disjoint** (scrolled ≤ 2, unscrolled ≥ 8). Card A (`MainThread.MainThreadAnimation`) behaves
-identically.
+**completely disjoint** (scrolled ≤ 2, unscrolled ≥ 8).
+
+**What this does and does not establish.** `CommitPresentedFrameToCA()` evaluates the *same*
+`GetDisplaytime(Now())` on both the immediate and the deferred path — there is no branch, so the timestamp
+source does not shift between the arms. But it is evaluated **at commit time**, so aligning the commit makes
+its input near-constant by construction and the *modelled* presentation times regular almost tautologically.
+So this pair shows that **scrolling engages the aligned commit path**; what shows that path is a *real*
+~120 Hz fix is the **external camera** (`diagnostic-findings.md` §5f) — the same backing the flag's own
+`Jank3` numbers above rely on.
+
+**Not a second witness:** `CompositorAnimation`, `NativePropertyAnimation` and `MainThreadAnimation` are
+byte-identical in these dumps because in mode A+B all three trackers span the same frames. Card A's
+independent witness is the camera, not this histogram.
 
 **Why the two files are a pair, not two runs.** Both phases share **one monitoring window**, so the second
 dump is *cumulative* and the unscrolled arm is `dump2 − dump1`, bucket by bucket. That subtraction is exact,

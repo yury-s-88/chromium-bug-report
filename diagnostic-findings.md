@@ -697,7 +697,7 @@ repro is squarely inside `is_handling_animation`: card A is `kMainThreadAnimatio
    hops from the commit/callback path "to avoid unnecessary delays" — after the 2025 experiment. So the
    measured cost of alignment today is not necessarily the cost that lost in 2025. *(Inferred.)*
 
-### 7g. A free falsifiable prediction — **CONFIRMED** *(visually observed, then camera-free measured; no build, no camera, no flag)*
+### 7g. A free falsifiable prediction — **HOLDS** *(visually observed, then corroborated on the passive counter; ground truth inherited from §5f)*
 
 `kVSyncAlignedPresentationForScrolling` is **on by default** and gates on `data.is_handling_interaction`,
 which is true while the page is **actively being scrolled**. The commit path taken during a scroll is
@@ -767,9 +767,14 @@ own published number.
 >
 > **Scrolling lands on the flag's number; not scrolling lands on the default's.** Not merely "better" —
 > **0.11 vs the flag's 0.1**, and **12.44 vs the default's 11.5**. The two distributions are **completely
-> disjoint**: every scrolled sequence scores ≤ 2, every unscrolled one ≥ 8. **Card A behaves identically**
-> (`MainThread.MainThreadAnimation`: 0.1 / 94.4 % scrolled → 12.4 derived unscrolled), matching §5f's finding
-> that the flag fixes both cards.
+> disjoint**: every scrolled sequence scores ≤ 2, every unscrolled one ≥ 8.
+
+**Not a second witness — one witness reported three times.** `CompositorAnimation`,
+`NativePropertyAnimation` and `MainThread.MainThreadAnimation` are **byte-identical** in both dumps (n = 34,
+same buckets). That is not card A independently confirming card B: in mode A+B both animations are active
+across the *same* frames, so all three frame-sequence trackers cover the same windows and report the same
+jank. Card A's independent witness is the **camera** (§5f / `IMG_3852`), not this histogram. *(Earlier
+wording here claimed card A "behaves identically" as corroboration — withdrawn.)*
 
 **How the unscrolled arm was obtained, and why the subtraction is sound.** The second dump is **cumulative**
 — monitoring was not reset between phases — so the unscrolled arm is `dump2 − dump1`, bucket by bucket. Three
@@ -780,6 +785,40 @@ buckets) — proving no further scrolling occurred in phase 2 *and* that dump 2 
 Being one monitoring window also makes this a **paired within-session measurement** — same launch, same
 process, same page instance — so launch-to-launch variance cancels, the same way §5f's single-clip pair
 cancels camera error.
+
+**The `Jank3` discipline of §7h applies here too — applied, and then discharged.** §7h establishes that on
+macOS the presentation timestamp is a **model**, so a favourable `Jank3` delta deserves the same discount as
+an unfavourable one. Refusing to apply it only when the number is a win would be exactly the bias §7h warns
+about. So the discriminating question was checked in source rather than assumed: **is `feedback.timestamp`
+computed differently on the aligned path than on the immediate one?**
+
+**No — there is no branch.** `CommitPresentedFrameToCA()` is a *single* function, reached either
+synchronously at the end of `Present()` or deferred from `OnVSyncPresentation()`, and on both paths it
+evaluates the identical expression:
+
+```
+display_time = GetDisplaytime(base::TimeTicks::Now());
+```
+
+So the timestamp *source* does not shift between the arms; only **when that line runs** does — which is
+precisely the physical variable under test.
+
+**But one honest residual remains, and it is why this section does not rest on `Jank3`.** `GetDisplaytime()`
+is evaluated **at commit time**, with `Now()` as its input. Aligning the commit to the DisplayLink callback
+makes that input near-constant *by construction* — so the **modelled** presentation times become regular
+almost tautologically, and the metric would report low jank for an aligned commit whether or not the real
+display outcome improved.
+
+**→ The ground truth is §5f, and it transfers by code-path identity.** Scrolling sets the *same* boolean and
+runs the *same* deferred `CommitPresentedFrameToCA()` from `OnVSyncPresentation()` that
+`--enable-features=VSyncAlignedPresentation` forces permanently — and **§5f already measured that path on an
+external 240 fps camera**, finding a true ~120 Hz advance (hold=2-dominant, 87 %), *not* a regularised
+60 Hz. So the correct reading is two-part, and neither half carries it alone:
+
+> The `Jank3` pair shows that **scrolling engages the aligned commit path**, cleanly and with disjoint
+> distributions. **§5f's camera** shows that **that path is a real fix**, not a metric artefact and not a
+> half-rate regularisation. This is the identical arrangement §6 already has — its flag `Jank3` numbers are
+> backed by §5f's flag camera; §7g inherits the same backing because it is the same code path.
 
 **Caveats, in order of seriousness:**
 
