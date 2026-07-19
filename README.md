@@ -37,9 +37,21 @@ measurements — localised the cause and confirmed a fix. Details and per-claim 
   2025 with three targeting arms (`AllFrames` / `Animation` / `Interaction`) and **narrowed to the
   scroll-only arm**, because broad alignment *"still has big regressions on guardrail metrics, although it
   improves a lot on smoothness metrics"* — Interaction-to-Next-Paint being the named cost. The flag we use
-  here is a **2026 re-introduction** of the rejected general behaviour, parked off by default. Full CL-by-CL
-  timeline, verbatim quotes and the resulting (narrower) upstream ask: **§7 of
+  here is a **2026 re-introduction** of the rejected general behaviour. Full CL-by-CL timeline, verbatim
+  quotes and the resulting (narrower) upstream ask: **§7 of
   [`diagnostic-findings.md`](diagnostic-findings.md)**.
+
+* **A measurement asymmetry worth stating plainly.** On macOS Chrome does not know when a frame was
+  actually presented — it **models** it (`PresentationFeedback` is built from the display-link's *predicted*
+  display time), and INP, EventLatency and CompositorLatency are all computed on that model, as are the
+  smoothness metrics. So **both** sides of the trade-off above are model-mediated — **including this
+  report's own Jank3 number**. What differs is ground truth: an external 240 fps camera settles the
+  smoothness side (measured below), and **nothing equivalent has been published for the latency side**.
+  Chromium engineers raised this about the same feature in 2023 — *"shifting this would directly shift the
+  metrics, however that does not mean that the actual presentation for the user changed"* — and the
+  control trial they proposed does not appear in any public source. Detail and the careful chronology
+  (the timestamp definition was revised in 2024, before the 2025 experiment, so this is **not** a claim that
+  the experiment was wrong): **§7h**.
 
 * **Mechanism (localised; source-readable + inferred).** The default macOS present commits the CALayer tree
   synchronously and *not* vsync-aligned; a documented ~1.5 ms latch deadline slips any late commit to the
@@ -76,8 +88,12 @@ measurements — localised the cause and confirmed a fix. Details and per-claim 
 > **no footage at all**: the flag test itself (**enable the flag, and the bug disappears**), and the
 > passive `Jank3` histogram above (**11.5 → 0.1**).
 
-Likely the same area as Chromium's in-progress ProMotion present work
-([crbug 40202100](https://issues.chromium.org/issues/40202100)).
+Same area as Chromium's open macOS present work —
+[issue 330771325](https://issues.chromium.org/issues/330771325), *"VSync aligned frame presentation on
+Mac"*, which is where `kVSyncAlignedPresentation` was added. *(The ProMotion umbrella
+[40202100](https://issues.chromium.org/issues/40202100) is **closed as Fixed** since 2023-12-19, with its
+reporter noting that specific failures should "be filed as new bugs"; its parent
+[40062488](https://issues.chromium.org/issues/40062488) closed 2025-03-07.)*
 
 ---
 

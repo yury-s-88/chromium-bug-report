@@ -567,7 +567,9 @@ around it (present-path latency trimmed three days later in CL 7701873; CL 59116
 and *"staged for a second attempt now that the present path is cheaper"* both fit. The timeline leans
 towards the second — but CL 7701873's latency trim is gated on **other** flags
 (`kAllowCallbackWithoutPostTask`, `kEnableDrDc`, `CADisplayLinkInBrowser`), so the "trim → re-attempt"
-link is **circumstantial, not proven**. The workstream bug **330771325** (sign-in required) would settle it.
+link is **circumstantial, not proven**. **The workstream bug 330771325 has since been read (§7h) and does
+not settle it** — all 16 of its comments are bot-posted CL notifications, with no human discussion. Both
+readings stand.
 
 **What is firm either way, and is what this report needs:** the gap the bug lives in is a **known, measured
 trade-off, not an oversight** — so the upstream ask must be a *scoped re-evaluation*, not "flip the flag"
@@ -635,8 +637,8 @@ trade-off, not an oversight** — so the upstream ask must be a *scoped re-evalu
 
 - **The `Animation` arm's standalone result is unknown.** CL 6558510 says only that `Interaction` was
   *best of three*. It does **not** say `Animation` was acceptable-but-second, and it does not say it was
-  harmful. Treat its individual numbers as **unread**. *(They are presumably in bug 330771325, which
-  requires sign-in.)*
+  harmful. Treat its individual numbers as **unread** — and now as **checked-and-absent**: bug 330771325
+  was read (§7h) and its 16 comments are all bot-posted CL notifications, with no per-arm data.
 - **CL 7690172 gives no reason for the disabled default.** Its entire review is one comment — *"lgtm,
   thanks."* So "off by default **because** `AllFrames` lost in 2025" is **inferred** from the chain
   (new flags start off; the same behaviour had already lost), not stated by anyone.
@@ -768,6 +770,115 @@ against the same published reference numbers as the flag. Until then §7g stays 
    silently repairs the cadence for its duration — so the degradation is easiest to see exactly where
    people look least: a static page left alone to animate.
 
+### 7h. What the issue trackers add *(primary-source: sign-in-gated tracker, snapshots 2026-07-19)*
+
+**Provenance.** `issues.chromium.org` requires sign-in; these are the reporter's own authenticated page
+snapshots, taken **2026-07-19**. All status claims are as-of that date.
+
+**Bug status — a correction to this report's earlier framing.** This report described
+[40202100](https://issues.chromium.org/issues/40202100) as Chromium's *in-progress* ProMotion work. It is
+not:
+
+| issue | title | status (2026-07-19) |
+|---|---|---|
+| 40202100 | ☂️ New Mac: Support for ProMotion display ☂️ | **Fixed**, closed 2023-12-19 |
+| 40062488 | Reliably VSync Aligned Rendering on macOS | **Fixed**, closed 2025-03-07 |
+| 345275139 | Support CADisplayLink on macOS | open, Assigned, P2 |
+| **330771325** | **VSync aligned frame presentation on Mac** | **open, Assigned, P2** — the flag's home |
+
+The umbrella was closed by its reporter (#66, 2023-12-19) with: *"This bug was about ensuring we supported
+ProMotion. If there are instances where Chrome does not correctly support it, **it's best to file them as
+new bugs**."* — the maintainer explicitly inviting a report shaped like this one. **The live bug to
+reference is 330771325**, not the umbrella.
+
+**§5a was stated by a Chromium graphics lead in 2021.** ccameron, 40202100 #12 (2021-10-20):
+
+> "with CADisplayLink we would [have] the ability to say 'draw this at the next vsync' whereas
+> CVDisplayLink gives us the ability to say 'give me a callback at the next vsync'. **Our compositor ends
+> up hoping that it commits its CATransaction at the right time** (the commit happens when the frame's
+> drawing is complete — we only have the ability to say when it starts)."
+
+That is §5a's free-floating commit, described five years before this report and independently of it.
+
+**The ~1.5 ms latch deadline has a provenance.** CL [5345141](https://crrev.com/c/5345141) (2024-03):
+*"From the experiment I did in my local machine … 1. Subtract 1.5 ms from the latch deadline. 2. Add one
+frame interval to PresentationFeedback.timestamp. Frames committed before the latch deadline is displayed
+at the next display time which is one frame interval further."* And CL
+[5051449](https://crrev.com/c/5051449) (2024-01) defines `feedback.latch_timestamp` as *"the time when
+CATransaction Commits and CoreAnimation latches the frame."*
+
+**The per-arm experiment numbers are not in the tracker.** 330771325's 16 comments are **all bot-posted CL
+notifications — zero human discussion**. So §7e's "the `Animation` arm's standalone result is unknown" is
+now **checked, not merely unread**, and §7a-ii's two readings of the 2026 default stay unresolved for the
+same reason.
+
+#### The one thing the trackers do change: what the guardrail metrics are made of
+
+**On macOS, Chrome does not know when a frame was actually presented — it models it.** jonross, 40062488
+#55 (2023-11-17):
+
+> "Historically macOS never provided the timestamp of when the GPU actually presented a frame. So, while
+> most platforms have that, on macOS we just used `Now` as the best-effort estimate … **A lot of metrics
+> are built on-top of this PresentationFeedback concept: INP, FCP, EventLatency, CompositorLatency**, etc.
+> The feature `kDelayOnFramePresent` changes when `PopulateCALayerParameters` is called … **So shifting
+> this would directly shift the metrics, however that does not mean that the actual presentation for the
+> user changed.** … To help confirm if the regression seen is **solely due to a metrics issue**, we could
+> run a trial where we do not shift the call … there is precedent for a metrics 'regression' where we fix
+> the accuracy."
+
+And the feature was switched off for exactly that reason — CL [5050323](https://crrev.com/c/5050323)
+(2023-11): *"the PresentationFeedback timestamps will be restored to the original one … Now
+CompositorLatency.TotalLatency and WebVitals.InteractionToNextPaint2 should not be regressed. … **We will
+try to enable kDelayOnFramePresent and communicate with the metrics team later on the PresentationFeedback
+timestamp change.**"*
+
+**Chronology — the over-read this subsection exists to prevent.** It is **wrong** to conclude "the 2025
+verdict was a metrics artifact":
+
+- jonross's concern is **2023-11**, when `feedback.timestamp` was `Now()` (render completion).
+- The timestamp was then **redefined** to the DisplayLink `display_time` (CL 5051449, 2024-01) and retuned
+  (CL 5345141, 2024-03).
+- The three-arm experiment and its *"big regressions on guardrail metrics"* verdict are **2025 — after
+  those revisions.**
+- jonross only **proposed** the no-shift control trial. Whether it ran, and what it showed, is in no public
+  source read here.
+
+What survives is narrower and still substantial: even after the revisions, the macOS presentation timestamp
+is a **prediction of when the frame will be shown** (`GetDisplaytime`), not a measurement of when it was —
+precisely the caveat this report already attaches to its own `Jank3` reading (§6).
+
+**And it cuts both ways — that is the point, not a hedge.** If the presentation timestamp is a model, then
+on macOS **both** sides of the trade-off are model-mediated:
+
+| side of the trade-off | measured by | estimate-independent ground truth? |
+|---|---|---|
+| smoothness **gain** (`Jank3`, `PercentDroppedFrames`) | Chrome's present model | **yes — this report's external 240 fps camera** (§5f: 60 % → 87 % hold=2) |
+| latency **cost** (INP, EventLatency, CompositorLatency) | the same present model | **none produced publicly by anyone** |
+
+This report's own `Jank3` **11.5 → 0.1** (§6) is **the same kind of number** as the guardrail regressions,
+and is already quoted with that caveat. What is asymmetric is not the metrics — it is the **ground truth**:
+an external camera exists for the smoothness side and settles it; nothing equivalent has been produced for
+the latency side.
+
+**Sharpened ask** (refining §7f):
+
+> Before the general vsync-aligned path is judged again, the **latency** side deserves the same
+> estimate-independent measurement the smoothness side now has. A 240 fps camera measures input-to-photon
+> directly and does not depend on `PresentationFeedback` at all — the same method this report used, pointed
+> at the other half of the trade-off. Failing that, the **no-shift control trial jonross proposed in 2023**
+> would separate model shift from real change.
+
+**One precedent, because it is the same judgement call this report is making.** magchen, 40062488 #28
+(2023-07-26), on the very CL that introduced the vsync-aligned commit:
+
+> "CL 4710566 that presents frames during VSync callback **actually regresses a bit more**, and there are
+> still drop frames. **Anyway, I would think this CL is needed. It reduces the flickering in**
+> https://www.vsynctester.com/"
+
+The author kept a change the metrics disliked because it visibly fixed something. And etienne (#24,
+2023-07-25) on what the regression looked like: *"There's no clear difference in Vsync precision, **except
+maybe its phase**."* — phase being exactly what §5f identifies and what the flag corrects.
+
 ---
 
 ## What is resolved / still open
@@ -885,8 +996,10 @@ against the same published reference numbers as the flag. Until then §7g stays 
     existing, implemented, **disabled-by-default** feature (`kVSyncAlignedPresentation`, `IsVSyncAligned()`)
     that defers the CALayer commit to the display-link callback. It sits in an **active, defaults-off macOS
     high-refresh/ProMotion present overhaul**: the CADisplayLink migration ("Support CADisplayLink on Mac",
-    commit `c920f54`, bug 40062488, disabled-by-default, macOS 14+, 2024) under the ProMotion umbrella
-    **issue 40202100**. So the bug is best framed as *"the default (non-vsync-aligned, CVDisplayLink) present
+    commit `c920f54`, disabled-by-default, macOS 14+, 2024 — its own bug is **345275139**, open). **Corrected
+    in §7h:** the right bug to cite is **330771325** *(VSync aligned frame presentation on Mac — open,
+    Assigned, P2; the flag's home)*, **not** the ProMotion umbrella 40202100, which was **closed as Fixed on
+    2023-12-19**, nor its parent 40062488, closed 2025-03-07. So the bug is best framed as *"the default (non-vsync-aligned, CVDisplayLink) present
     path drops compositor-animation cadence on ProMotion under concurrent per-frame main-thread work; the
     in-development vsync-aligned path already fixes it — here is a minimal camera-measured repro, the exact
     trigger, and the exact toggle."* Note that the scrolling-only variant `kVSyncAlignedPresentationForScrolling`
