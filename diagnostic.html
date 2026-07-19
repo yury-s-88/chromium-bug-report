@@ -40,6 +40,16 @@
                               If both hold ~115 Hz → pure-compositor animations do not throttle each
                               other; the throttle requires a main-thread frame producer.
 
+  THE §7g SCROLL PROBE (bottom-right box)
+  ───────────────────────────────────────
+  A separate, stock-Chrome test that needs no flag, no camera and no build. Chrome ALREADY ships
+  vsync-aligned present — but only for frames cc marks is_handling_interaction, i.e. only while you
+  are actively scrolling (kVSyncAlignedPresentationForScrolling, ENABLED_BY_DEFAULT). So scrolling
+  that box should hand card B the same fix the flag gives permanently, for the duration of the
+  gesture. Run mode "A + B" on Loop and scroll it. It is pure HTML/CSS — no JS, no per-frame work of
+  its own — and it is inert unless scrolled, so it does not affect any other mode.
+  Full rationale and the falsification condition: diagnostic-findings.md §7g.
+
   Note on the numbers this is chasing: the README's "54–59%" is the fraction of hold EVENTS that
   are single-interval, not a duty cycle.  Computed from intervals consumed, the effective visible
   cadence is ≈115 Hz for B alone falling to ≈78 Hz beside the layout animation — irregular, NOT a
@@ -124,6 +134,36 @@
     padding: 8px 10px; border-radius: 6px; background: #111; color: #0f0;
     font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre;
   }
+
+  /* ── §7g SCROLL PROBE ────────────────────────────────────────────────────────────────────────
+     See diagnostic-findings.md §7g. kVSyncAlignedPresentationForScrolling ships ENABLED BY DEFAULT
+     and gates the vsync-aligned CALayer commit on CompositorFrameMetadata::is_handling_interaction,
+     which cc sets from LayerTreeHostImpl::IsHandlingInteraction() — true for an ACTIVE SCROLL or an
+     in-progress touch sequence, and nothing else. So scrolling any compositor scroller should route
+     the frames through the SAME aligned-commit path that --enable-features=VSyncAlignedPresentation
+     forces permanently.  PREDICTION: card B goes smooth WHILE the gesture is in progress.
+
+     Three deliberate design choices, each load-bearing:
+       • position:fixed is on the SCROLLER, never on the cards — promoting the cards to their own
+         layer would change their present setup, and a null result could then be the harness rather
+         than the mechanism.
+       • fixed + own layer ⇒ the cards' geometry and the existing layout are untouched, so every
+         other mode and any existing crop rectangle still behave exactly as before.
+       • NO JavaScript at all. The scrolling text is its own "gesture is live" indicator, so the test
+         adds zero per-frame main-thread work — which matters, because per-frame main-thread work is
+         the bug's own trigger (§2).
+     Note the confound runs the RIGHT way: scrolling ADDS compositor/main-thread work, which by §2
+     should make card B worse. So "smooth while scrolling" cannot be explained by reduced load. */
+  #scrollProbe {
+    position: fixed; right: 22px; bottom: 22px; width: 240px; height: 190px;
+    overflow-y: scroll; background: #fff; border: 1px solid #d1d5db; border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .12); font-size: 13px; color: #374151;
+  }
+  #scrollProbe .sp-head {
+    position: sticky; top: 0; background: #111827; color: #f9fafb; padding: 6px 10px;
+    font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  #scrollProbe p { margin: 0; padding: 9px 10px; border-bottom: 1px dashed #e5e7eb; }
 </style>
 
 <div id="hint">
@@ -169,6 +209,34 @@
   <div id="fcBits"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
 </div>
 <div id="rafctl">pick a mode · Fire once</div>
+
+<!-- §7g scroll probe — no JS, inert unless you scroll it. HOW TO RUN THE TEST:
+       1. stock Chrome, NO flags, DevTools CLOSED, 120 Hz ProMotion display
+       2. mode "A + B (the bug condition)" → ⟳ Loop
+       3. watch card B: jerky (the bug)
+       4. now two-finger scroll INSIDE this box — fingers DOWN, slow and continuous, not a flick
+          (a flick ends the gesture and momentum may not keep is_handling_interaction set)
+       5. watch card B *during* the gesture, then let go and watch it again
+     PREDICTION: smooth while scrolling, back to jerky when the scroll stops. -->
+<div id="scrollProbe">
+  <div class="sp-head">§7g · scroll me, fingers down<br>watch card B while you do</div>
+  <p>Chrome already vsync-aligns the CALayer commit —</p>
+  <p>but only for frames where cc reports</p>
+  <p><code>is_handling_interaction</code>,</p>
+  <p>which is set for an active scroll</p>
+  <p>or an in-progress touch sequence,</p>
+  <p>and for nothing else.</p>
+  <p>So this box is the same fix as the flag,</p>
+  <p>granted for exactly as long as</p>
+  <p>you keep scrolling.</p>
+  <p>Keep going —</p>
+  <p>card B should be smooth right now.</p>
+  <p>Let go, and it should break again.</p>
+  <p>(If it does not, §7g is refuted</p>
+  <p>and the commit-phase story needs</p>
+  <p>re-examination. Record which.)</p>
+  <p>&nbsp;</p>
+</div>
 
 <script>
   const $  = id => document.getElementById(id);

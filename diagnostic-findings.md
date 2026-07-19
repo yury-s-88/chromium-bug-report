@@ -701,13 +701,20 @@ therefore *the same vsync-aligned path* the flag forces all the time.
 > scroll — card B should become **smooth while a scroll gesture is actively in progress** and revert to
 > jerky the moment the scroll ends.
 
-**How to run it cleanly.** The cards must **stay still while something scrolls**, or they translate with the
-viewport and neither the eye nor `track_cadence.py` can read their cadence. **Prefer a scrollable inner
-container** (a `overflow-y: scroll` box of filler text, scrolled with the pointer over it) with the cards
-left **outside** it, untouched. *Avoid* the obvious `position: fixed` wrapper: promoting the cards to their
-own compositing layer changes the present setup itself, so a null result there could be the harness rather
-than the mechanism. Then: start A+B, confirm card B is jerky, begin a slow continuous two-finger scroll
-inside the box, and watch card B *during* the gesture.
+**The harness is built — it is the bottom-right box in `diagnostic.html`.** Design constraints, each
+load-bearing: the cards must **stay still while something scrolls** (otherwise they translate with the
+viewport and neither the eye nor `track_cadence.py` can read their cadence), so the scroller is a small
+`position: fixed`, `overflow-y: scroll` box with the cards left **outside** it and untouched. `position:
+fixed` is deliberately on the **scroller, never on the cards** — promoting the cards to their own
+compositing layer would change their present setup, and a null result could then be the harness rather
+than the mechanism. And it is **pure HTML/CSS, zero JavaScript**: the scrolling text is its own
+"gesture is live" indicator, so the test adds no per-frame main-thread work — which matters, since that
+is the bug's own trigger (§2).
+
+**Procedure.** Stock Chrome, **no flags**, DevTools closed, 120 Hz. Mode **A + B** → **Loop** → confirm
+card B is jerky → two-finger scroll **inside the box**, fingers down, slow and continuous (not a flick —
+a flick ends the gesture and momentum may not keep `is_handling_interaction` set) → watch card B *during*
+the gesture, then release and watch again.
 
 **Why a positive result would be strong.** The obvious confound runs the *wrong way*: scrolling **adds**
 main-thread and compositor work, which by §2's trigger should make card B **worse**, not better. So
