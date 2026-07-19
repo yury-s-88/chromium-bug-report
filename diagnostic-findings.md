@@ -754,9 +754,10 @@ touches zero Chrome code yet suppresses). The difference here is that we have a 
 predicts it**, and the recorder case did not — plus a passive-counter measurement that lands on the flag's
 own published number.
 
-> **HARDENED — camera-free confirmation on a passive counter** *(2026-07-19; raw dumps in
-> [`telemetry/`](telemetry/)).* Stock Chrome, **no flag**, A+B on Loop, one monitoring window, two sequential
-> phases — **scrolling throughout, then not scrolling at all**:
+> **MEASURED on the passive counter** *(2026-07-19; raw dumps in [`telemetry/`](telemetry/)).* Stock Chrome,
+> **no flag**, A+B on Loop, one monitoring window, two sequential phases — **scrolling throughout, then not
+> scrolling at all**. *(Read with the two-part framing below: this shows the aligned path is **engaged**;
+> §5f's camera is what shows that path is a **real** fix.)*
 >
 > | `Jank3.CompositorThread.CompositorAnimation` (card B) | n | mean | at zero |
 > |---|---:|---:|---:|
