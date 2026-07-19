@@ -1,0 +1,620 @@
+# Diagnostic phase — localising the cadence loss *below* Chrome
+
+Companion to the top-level `README.md`. The README establishes the bug **at the display**, with an
+external 240 fps camera (tripod, sharp). This note records a follow-up diagnostic phase — a Perfetto
+trace, behavioural discriminators, a refresh-rate comparison, a flag sweep, and a **source-level read of
+the macOS present path** (§5) — that narrows *where* the cadence is lost, *what triggers it*, and *the
+code that pins it*.
+
+**As with the README, the standard of evidence is marked explicitly:** *trace-measured*,
+*camera-measured*, *visually observed*, or *inferred*. Most follow-up clips here were handheld with
+soft focus and yield no reliable rate; the exception is the refresh-rate clip (§3), which is
+**self-validating** — its 120 Hz reference reproduces the known bug (see *Method caveats*).
+
+---
+
+## Summary of the refined finding
+
+1. **Not Chrome's compositor/Viz scheduling.** *(trace-measured.)* During the `both` condition the
+   whole Chrome pipeline — vsync source → BeginFrame → compositor draw → `SwapBuffers` /
+   `ImageTransportSurfaceOverlayMac::Present` — runs at a clean ~120 Hz. The cadence loss the camera
+   sees is **below `SwapBuffers`**, in the macOS present path (CoreAnimation / WindowServer).
+
+2. **Trigger is per-frame main-thread work — not compositor concurrency.** *(visually observed.)*
+   Card B (compositor `transform`) becomes visibly irregular under **CPU busywork** (no commit) and
+   under a **paint-only write** (`color`), but stays **smooth** when a *second compositor animation*
+   runs beside it (`two transforms`). So a main-thread frame producer is required; two pure-compositor
+   animations do not throttle each other. Even CPU busywork **with no commit at all** is sufficient.
+
+3. **Rate-dependent, and macOS-specific.** *(camera-measured + visually observed.)* On the same panel
+   switched to a fixed **60 Hz**, card B is nearly smooth (~8–16 % of refreshes held) versus **52 %**
+   held at 120 Hz — an in-clip control that also *validates the method* (the 120 Hz swing reproduces
+   the known bug). The numbers fit one interpretation: **card B's present is pinned near ~55 Hz
+   regardless of display rate** — catastrophic-looking at 120 Hz (≈half), nearly fine at 60 Hz (≈full).
+   On **Windows @ 144 Hz** the animation is smooth *(visual)*, so it is **not** high refresh rate per
+   se — it is the macOS present path.
+
+**Refined mechanism statement (inferred from the above):**
+> Per-frame main-thread activity — CPU contention *or* a commit — perturbs the **macOS present** of
+> a compositor animation. Not Chrome's scheduling; not compositor-layer concurrency; the final present.
+>
+> Quantitatively (§3), that perturbation **pins card B's present near ~55 Hz** — a macOS-specific value,
+> visible as a large drop only when the display runs faster than it.
+
+**Mechanism now localised in source, with a source-predicted one-flag fix that lands by eye (§5).** The
+macOS present commits the CALayer tree **synchronously, not vsync-aligned** (`kVSyncAlignedPresentation` is
+off by default), so the commit phase free-floats; a documented **~1.5 ms latch deadline** slips any late
+commit to the next refresh; the main-thread producer supplies the "late" via the Viz begin-frame deadline.
+**Prediction and result:** launching with `--enable-features=VSyncAlignedPresentation` — which only
+re-anchors the commit to a fixed pre-vsync phase — makes **every mode smooth by eye** *(visually observed,
+§5d)*. The prediction was made from source *before* the test.
+
+> **"Smooth by eye" is this report's suppressor signature** (DevTools/recorder/CDP all made the bug *appear*
+> to vanish without fixing it), so a by-eye result cannot by itself distinguish a genuine fix from suppressor
+> #4. The **external 240 fps camera** — the one channel proven not to suppress — is what settles it, and now
+> has: a fixed-camera **default-vs-flag pair** (`IMG_3848`, §5f) shows **card B in the A+B bug condition go
+> from an in-clip-validated bug-level 60 % to a smooth-control-level 87 % hold=2, hold=2-dominant** — a true
+> ~120 Hz, not a regularised 60 Hz. **Camera-confirmed for card B in A+B.** (Busywork/color under the flag
+> were left under-sampled by a short second cycle — inconclusive, not refuted; card A/layout does *not* reach
+> that smoothness. Scope stays on A+B.) **Update:** a later full-travel clip (`IMG_3852`) extends the
+confirmation to **card A** too — flag-only card A = card B = 91 %, so the flag fixes both; the apparent
+card-A residual above was a crop-clipping artefact, now withdrawn.
+
+**One thing the flag result *does* bank now (free):** it operates entirely in the present/commit path
+**below `SwapBuffers`**, so its effect **independently localises the bug below `SwapBuffers`** — that
+localisation no longer rests on the possibly-suppressed Perfetto trace (§1). It also hands users a likely
+**workaround** and names the **upstream fix target**.
+
+This *refines* the README's framing ("a compositor `transform` inherits the *layout* animation's
+cadence"): the trigger is neither specifically `layout` nor even a commit — it is any per-frame
+main-thread work. The README's own supplementary note (one fixed-position text update per rAF took
+card B from 98 % to 80 %) is the same effect, now isolated.
+
+---
+
+## 1. Trace analysis — `IMG_3841.mov` + `trace_…​.pftrace`
+
+**Setup.** `diagnostic.html`, mode **A + B**, stamp **off**, DevTools closed. Trace recorded via
+`chrome://tracing` (manual categories `cc, viz, gpu, blink, toplevel, benchmark`; **no** screenshot /
+disabled-by-default categories, to avoid a capture path that could itself suppress). External 240 fps
+camera filmed the screen concurrently. Parsed with Perfetto `trace_processor`.
+
+`performance.mark('combined-*')` located **16 `combined` runs**. Within them, `Document::UpdateStyle­AndLayout`
+(card A layout) and `AnimationHost::TickAnimations` (card B compositor animation) are both dense —
+i.e. the `both` condition was genuinely active.
+
+Per-stage cadence during the `combined` windows *(trace-measured)*:
+
+| stage | event | result |
+|---|---|---|
+| vsync source | `CVDisplayLinkCallback` | ~120 Hz, regular, **0** intervals in the 60 Hz band |
+| BeginFrame | `ExternalBeginFrameSource::OnBeginFrame` | ~120 Hz, regular |
+| compositor draw | `DrawLayers.FrameViewerTracing` | ~103 Hz |
+| **present (swap)** | `SwapBuffers` / `ImageTransportSurfaceOverlayMac::Present` | ~103–120 Hz, **85 %** of intervals at 8.3 ms, only **2 / ~3000** in the 14–20 ms (60 Hz) band |
+| present feedback | `AnimationFrame::Presentation` | ~**17 %** of intervals in the 14–20 ms (60 Hz) band |
+
+**Reading.** BeginFrame is *not* throttled to 60 Hz — this **rules out** the "Viz/cc frame-interval
+throttling" hypothesis and bisection points A (BeginFrame) and B (draw scheduling). Chrome's pipeline
+*through the CALayer present* is clean 120 Hz. The one signal carrying a 60 Hz component is the
+**presentation feedback** (`AnimationFrame::Presentation`, ~17 %), i.e. *when frames actually reached
+the display* — pointing below `SwapBuffers`, at the macOS present.
+
+**Caveat (honest).** The camera clip for this trace was too noisy (handheld + soft focus + exposure
+straddling) to *independently* confirm whether the bug **survived** tracing or was **suppressed** by
+it. So whether Perfetto tracing suppresses (as DevTools / ScreenCaptureKit / CDP do) is **not cleanly
+resolved**. Either way, the trace being clean through `SwapBuffers` rules out Chrome-side scheduling.
+
+---
+
+## 2. Behavioural discriminators — `IMG_3842.mov` *(visually observed)*
+
+**Setup.** `diagnostic.html`, external camera, **no** trace / DevTools. Three modes in one clip.
+The bug is grossly visible (per the README), so *jerky vs smooth by eye* is the report's own valid
+detector — and it is the trustworthy signal here (the camera **held-fraction** for this clip was
+unreliable: tracking noise exceeded the signal and mis-ordered the modes; see *Method caveats*).
+
+| mode | per-frame main-thread work | commit | card B |
+|---|---|---|---|
+| **B + main-thread busywork** (CPU busy-loop) | yes | **no** | **jerky** |
+| **B + non-layout write** (`color`) | yes | yes (paint) | **jerky** |
+| **two transforms** (B + C, both compositor) | **no** | no | **smooth** |
+
+**Reading.** A main-thread frame producer is **required**. Two compositor animations do **not**
+throttle each other. And `busywork` — pure CPU each frame, *no* DOM write, layout or paint — is
+enough, so a commit is **not** required; main-thread *occupancy per frame* suffices.
+
+---
+
+## 3. Refresh-rate dependence — `IMG_3844.mov` (camera) + Windows @ 144 Hz (visual)
+
+**This is the one clean, self-validating camera measurement of the diagnostic phase.** The same
+ProMotion panel was switched from 120 Hz to a fixed 60 Hz *during* one recording (the page's own rAF
+control read `8.3 ms / ~120 Hz` before the switch, `16.7 ms / ~60 Hz` after — the switch landed at
+~30–35 s), so both rates are captured in one clip, same method, same card. Card B (mode **A + B**)
+animated on both sides of the switch:
+
+| swing | display | card B held | effective present |
+|---|---|---|---|
+| 1 (27–32 s) | **120 Hz** | **52 %** of 72 refreshes | ~58 Hz |
+| 2 (37–42 s) | **60 Hz** | 16 % of 36 refreshes | ~50 Hz |
+| 3 (47–50 s) | **60 Hz** | 8 % of 36 refreshes | ~55 Hz |
+
+**Why this clip is trustworthy where the others were not.** The 120 Hz swing reads **52 %** held —
+i.e. it *reproduces the known bug* (README: ~46 %). A method that correctly detects the bug at 120 Hz
+and reads ~8–16 % at 60 Hz is measuring a real difference, not a noise floor. The 60 Hz step is also
+larger (~9 px vs ~4.5 px), improving signal-to-noise.
+
+**Reading — a pin, not a ratio.** The *effective* present rate is ~similar at both display rates
+(~50–58 Hz). So the effect is not "B drops to a fraction of the display rate"; it is:
+
+> Card B's present is **pinned near ~55 Hz**. At 120 Hz that is ≈half (52 % held — looks broken);
+> at 60 Hz that is ≈full (8 % held — looks smooth).
+
+A single "~55 Hz cap" predicts **54 % / 8 %** held at 120 / 60 Hz; measured **52 % / 8–16 %** — a near
+exact fit. This ties together the README's "inherits ~60 Hz cadence" phrasing, the §2 trigger
+(per-frame main-thread work), and the §1 localisation (below `SwapBuffers`, macOS present).
+
+**Windows @ 144 Hz** *(visually observed, no capture).* The same repro on Windows at 144 Hz is smooth
+(subjectively ~98 %, only rare isolated hitches). 144 Hz > 120 Hz, so **high refresh rate alone is not
+the cause** — the pin is specific to the **macOS present path** (Windows uses DWM / DirectComposition,
+not CoreAnimation). Same standing as the README's Firefox contrast: a qualitative cross-platform check,
+not a camera measurement.
+
+**Caveat.** Small sample (1 × 120 Hz + 2 × 60 Hz swings), but internally consistent and method-validated.
+The 60 Hz here is a *stable* 60 Hz (rAF intervals all 16.7 ms), so this is **rate**-dependence, not
+variable-vs-fixed refresh; a fixed 120 Hz macOS panel (non-ProMotion) remains untested.
+
+---
+
+## 4. Flag sweep — the bug lives in the Metal present path *(visually observed)*
+
+**Method.** `diagnostic.html`, mode **A + B**, display at **120 Hz** (confirmed each time via the page's
+rAF control ≈ 8.3 ms), **one flag changed at a time**, restart between each, card B watched by eye
+(jerky = bug present). Every flag confirmed applied via `chrome://gpu` / `chrome://version`.
+Chrome 150.0.7871.125, macOS 15.7.3, M4 Pro.
+
+| change (A+B on Metal, 120 Hz) | card B | note |
+|---|---|---|
+| **Metal** (default, ANGLE-Metal) | **jerky** (bug) | baseline |
+| **Hardware acceleration OFF** (software compositing) | coupling **gone** | but slow-raster jank in single-card modes |
+| **ANGLE → OpenGL** (`--use-angle=gl`, rAF still 120 Hz) | coupling **gone** | but single-card judder — an OpenGL-path quirk, unexplained |
+| `--disable-gpu-vsync` | **jerky** | not a vsync-lock |
+| Skia Graphite (all variants) | **jerky** | not the raster backend (Ganesh & Graphite both present via Metal) |
+| `--disable-frame-rate-limit` | — | **black window**; breaks present entirely — inconclusive (but itself shows the action is in present) |
+| `--disable-remote-core-animation` | **jerky** | inconclusive (flag likely ignored in 150) |
+
+**Reading.** The coupling is present **only** on the default Metal present path; swapping the *entire*
+present backend (software compositing or ANGLE-OpenGL) removes it. **No knob *within* Metal** — GPU
+vsync, Skia raster backend, remote CoreAnimation — turns it off. So it is not a configurable
+sub-behaviour: it is inherent to how the **Metal → CoreAnimation present** handles the concurrent-animation
+case. (The alternative backends each bring their own perf issues — software slow-raster, OpenGL
+single-card judder — so they are *layer-confirmation*, not usable workarounds.)
+
+Consistent with §1 (clean through `SwapBuffers`) and §2 (per-frame main-thread trigger): the ~55 Hz pin
+lives in the **Metal CALayer commit / CoreAnimation present**, where the compositor frame is handed to
+the OS. *(Flag results are by-eye, now partly camera-corroborated: the software clip `IMG_3845` reads
+card B **~23 % held** in software A+B — its one cleanly-sampled 240 fps swing — vs **~52 %** on Metal.
+Coupling clearly reduced, though not down to fully smooth (~2 %), consistent with software's own raster
+overhead. A Metal-vs-OpenGL camera pair remains the cleaner rigor step.)*
+
+---
+
+## 5. Source dive — the macOS present path in code *(source-readable + inferred + one falsifiable prediction)*
+
+Read against the exact reproduced build (**Chrome 150.0.7871.125**, tag re-fetched — the hot present
+path is byte-identical to `main`; the only 150-vs-`main` deltas are a `PowerMonitor` observer and a
+`RefreshRateChangedOnSameDisplay`/`OnResume` DisplayLink refresh, none on the per-frame path). Standard
+of evidence is marked per claim: **source-readable** (the code says so), **inferred** (follows from the
+code but not directly shown), **predicted** (a falsifiable test is named).
+
+### 5a. What the default macOS present actually does *(source-readable)*
+
+`gpu/ipc/service/image_transport_surface_overlay_mac.mm` — `Present()` → `CommitPresentedFrameToCA()`:
+
+- **The commit is *not* vsync-aligned by default.** `delay_presentation_until_next_vsync` is gated on
+  `features::IsVSyncAligned()`, and `kVSyncAlignedPresentation` is **`FEATURE_DISABLED_BY_DEFAULT`**
+  (`components/viz/common/features.cc`). The scrolling variant `kVSyncAlignedPresentationForScrolling`
+  *is* on by default, but only applies `if (data.is_handling_interaction)` — this repro doesn't scroll,
+  so it never triggers. **Net: every `Present()` calls `CommitPresentedFrameToCA()` synchronously, at
+  whatever wall-clock moment the GPU thread finishes the frame** — the CALayer/CATransaction commit
+  phase relative to the WindowServer refresh is *free-floating*, not latched to vsync.
+- **Max pending swaps = 2 on macOS**, not 1 and not the Android high-rate 4:
+  `skia_output_device_buffer_queue.cc` sets `number_of_buffers = 3` → `max_pending_swaps = 2`; the
+  per-rate `_120hz = 4` override is `#if BUILDFLAG(IS_ANDROID)` only. In the immediate-commit mode the
+  cap barely binds (each frame commits in its own `Present()`), so this is *not* a 1-in-flight
+  throughput cap — an earlier framing I checked and discarded.
+- **A latch deadline exists and is documented in-code.** `GetDisplaytime()` comment, verbatim from
+  Chrome's own experiments: *"frames committed before (current_display_time − 1.5 ms) will be displayed
+  at the next display time … The result is inconsistent … if commit is too close to the display_time."*
+  So a commit that lands within ~1.5 ms of a refresh (or after it) **slips a full refresh**. This is the
+  concrete, readable mechanism by which a "held" frame is produced — no opaque WindowServer coalescing
+  needed to explain it.
+- **`CommitScheduledCALayers` sets no explicit CATransaction timing** (`ca_renderer_layer_tree.mm`) —
+  it updates CALayer properties under `ScopedCAActionDisabler`; `display_time`/`frame_interval` are used
+  only to fill the *reported* `PresentationFeedback`, never to schedule the transaction. The transaction
+  floats at commit wall-time.
+
+### 5b. The one Metal-vs-GL divergence in the present path *(source-readable)*
+
+The CALayer commit path is **identical** for ANGLE-Metal and ANGLE-GL (both hand an IOSurface to the
+same `CommitScheduledCALayers`). The single place the two backends genuinely diverge is the back-pressure
+wait in `CALayerTreeCoordinator::ApplyBackpressure()` (`ca_layer_tree_coordinator.mm`), run at the top of
+every `CommitPresentedFrameToCA()`:
+
+- **Metal:** polls the previous frame's `MTLSharedEvent` in a `while (!signaled) { check; Sleep(1 ms); }`
+  loop — a **1 ms-quantized busy-poll**.
+- **GL / software:** `backpressure_metal_fences` is **empty**, so that loop is a no-op; instead a
+  `GLFence::ClientWait()` (created in `Present()` only `if (ANGLEImplementation != kMetal)`, guarded by
+  `CHECK_NE(..., kMetal)`) blocks and wakes **exactly** on GPU completion.
+
+Provenance traced end-to-end: the fences come from `access->GetBackpressureFences()`
+(`output_presenter_gl.cc`), which returns `IOSurfaceImageBacking::exclusive_shared_events_`
+(`iosurface_image_backing.mm`). That set is populated **only** by Metal `EndAccess`
+(`AddSharedEventForEndAccess`, from Dawn/Ganesh-Metal) — empty on the GL path. This is the one code-level
+Metal/GL split in the present path, and it aligns with the §4 flag sweep (Metal reproduces, GL & software
+don't) — **but whether it actually operates on this light workload is the open question §5c takes up.**
+
+### 5c. Trigger vs pin — the two-part mechanism *(inferred, each arrow tied to code)*
+
+**Trigger (cross-platform — explains why even CPU busywork with *no* commit is enough):**
+`requestAnimationFrame` itself requests a `BeginMainFrame` every vsync. `DisplayScheduler`
+(`FrameDeadlineDecider` / `GetOSPreferredDeadline`, "use 75 % of the deadline for CPU work") waits for
+the renderer's CompositorFrame up to a deadline before `AttemptDrawAndSwap`. A busy/producing main thread
+delays that CompositorFrame → `DrawAndSwap` runs later in the interval → the GPU-thread `Present()` /
+`CommitPresentedFrameToCA()` lands **later in the vsync interval**. Two pure-compositor transforms request
+*no* main frame → no delay → smooth. This is the same `cc`/Viz scheduler on GL and Windows, so it is the
+**trigger, not the pin**.
+
+**Pin (Metal-specific) — the honest limit of what the code shows.** With the commit free-floating (5a)
+and pushed late by the trigger, a commit that lands near/after the ~1.5 ms latch deadline slips to the
+next refresh; if that happens on ~every other 120 Hz refresh, card B advances ~55–58×/s, and at 60 Hz the
+16.7 ms interval absorbs the same lateness → nearly smooth — a **rate-independent ~55 Hz pin** that fits
+the measured **52 % / 8–16 %** (§3). *That* half is readable and cross-platform. **What is *not* settled
+in readable code is why this is Metal-only.** Both readable Metal-vs-GL candidates come up short:
+
+- **The free-floating commit (5a) is not Metal-specific** — `kVSyncAlignedPresentation` is off for the GL
+  path too, so GL commits just as un-aligned, yet GL is smooth (§4). So 5a alone cannot be the pin.
+- **The `ApplyBackpressure` poll (5b) probably does not even fire here.** It waits on the *previous*
+  committed frame's fence; that frame was drawn ~8.3 ms earlier and two small cards render in well under a
+  millisecond, so the fence is almost certainly **already signaled on entry** — the loop runs once, no
+  `Sleep`, no quantization, and returns at the same instant GL's `ClientWait` would. The 1 ms poll only
+  bites if GPU render exceeds the frame interval, which this light workload does not. So on this repro the
+  Metal/GL divergence in `ApplyBackpressure` likely **does not operate** — it cannot be assumed to be the
+  pin. (`Gpu.Mac.BackpressureUs`, §5e-2, measures whether it ever sleeps — that is the arbiter, not code
+  reading.)
+
+So the source dive **localises the trigger and the entire commit-timing machinery**, but *from code alone*
+does **not** conclusively identify the Metal-specific pin. **→ The §5d fix experiment points at it and the
+§5f camera pair confirms it (for card B / A+B):** forcing vsync-aligned commit takes card B from an
+in-clip-validated bug-level 60 % to smooth-control 87 % hold=2, so the pin **is** the commit phase (the
+free-floating commit crossing the latch deadline). What remains unread is only the narrower question of *why the default Metal path
+enters that bad phase while default GL does not* — most likely a per-frame commit-timing-profile difference
+(GL's present may carry implicit vsync pacing that ANGLE-Metal's async commit lacks), closable by the §5e
+`now_to_display` / histogram reads rather than an ANGLE dive.
+
+### 5d. Falsifiable prediction + the fix target *(predicted — testable in minutes)*
+
+The code already contains the cure and it is **off by default**: enabling `kVSyncAlignedPresentation`
+makes `Present()` defer the commit and lets `OnVSyncPresentation()` (the CVDisplayLink callback, which
+fires at a fixed ~1.5-interval offset *before* the target display time) do it — anchoring the commit to a
+fixed pre-vsync phase and bypassing the variable draw-completion / 1 ms-poll phase entirely.
+
+> **Prediction:** launching Chrome with `--enable-features=VSyncAlignedPresentation` (display at 120 Hz,
+> mode A + B, DevTools closed) should make card B **smooth**. It anchors the commit to a fixed pre-vsync
+> phase, so it targets the "commit lands late past the latch deadline" family *regardless of which
+> sub-mechanism dominates*. A by-eye pass makes it a **candidate** fix; the external camera is what would
+> confirm it (see the suppression caveat below). If it does **not** even look smooth, the pin is upstream of
+> the commit phase (GPU-completion timing / ANGLE-Metal present itself).
+
+> **RESULT — PREDICTION LANDS BY EYE** *(visually observed; since **camera-confirmed for A+B in §5f**).* Run
+> with `--enable-features=VSyncAlignedPresentation` (Metal default, 120 Hz, DevTools closed): **every mode
+> looks smooth** — including the ones jerky on stock Chrome (A + B, CPU busywork, `color`). The prediction was
+> made from the source read *before* the test, so it is a genuine predictive hit; §5f then measured it with an
+> external camera.
+
+> ⚠️ **Fix vs. suppression — the open question this project exists to police.** Every on-machine
+> intervention this report tried — DevTools, screen recorder, CDP — made the bug *look* fixed without fixing
+> it. A by-eye "smooth" is therefore the **suppressor signature**, and cannot by itself tell a real fix from
+> suppressor #4. What separates this case: mechanistically the flag alters **rendering-schedule code below
+> `SwapBuffers`**, not an observation channel, and was predicted from source; and evidentially, the **external
+> 240 fps camera** (the one channel proven not to suppress) has now **confirmed it for card B in A+B** — see
+> **§5f**, the fixed-camera default-vs-flag pair. This was recorded here as a candidate; §5f promotes it to
+> confirmed (scoped to A+B).
+
+**What the flag result establishes — and its evidentiary limit.** `VSyncAlignedPresentation` changes exactly
+one thing — *when* the otherwise-identical CALayer commit is issued (synchronous end-of-`Present()`, variable/
+late phase → deferred to the `OnVSyncPresentation()` CVDisplayLink callback, fixed pre-vsync phase). Render
+backend, backpressure, CALayer tree and IOSurfaces are untouched — a near-single-variable experiment. But the
+readout so far is by-eye, so:
+
+- **Cause: the commit's phase relative to the display refresh** — the free-floating commit crossing the
+  ~1.5 ms latch deadline (§5a); re-anchoring the phase removes the jerk. By-eye here, then **camera-confirmed
+  for card B / A+B in §5f** (default 60 % → flag 87 % hold=2, self-validated in-clip).
+- **If real, commit-phase alone is sufficient to cure it:** the flag touches only *when* the commit issues,
+  not the ANGLE-Metal render path, raster, or the *amount* of backpressure work. (Sufficiency, not exclusion:
+  correcting the phase is enough; this does not prove render/GPU-completion timing plays no *upstream* role in
+  producing the bad phase.) Consistent with the `ApplyBackpressure` poll being a non-factor (§5c).
+- **The camera pair is the confirmation, and must read the *rate*, not just "smooth."** Shoot the same clip
+  Metal-default vs Metal+flag (so the default swing self-validates at ~52 % held, as `IMG_3844` did in §3).
+  The flag run must show a true **~120 Hz advance (held ≈ 2 %)** — *not* a regularised ~60 Hz that also looks
+  smooth by eye but would mean the flag traded jerk for half-rate. `VSyncAlignedPresentation` gates commits to
+  the CVDisplayLink tick, so this is a real thing to check, not a formality.
+- **Still one narrowed open link:** *why the default Metal path lands in the bad phase while the default GL
+  path does not* — most likely a per-frame commit-timing-profile difference (see §5e `now_to_display`). Minor
+  and well-scoped, not the crux.
+
+**Fix target for the upstream bug report:** primarily (1) default the macOS present to vsync-aligned for
+the non-scrolling case, or otherwise pace the CALayer commit to clear the ~1.5 ms latch deadline — this is
+the fix §5d directly tests. Secondarily, **only if `Gpu.Mac.BackpressureUs` (§5e-2) shows the poll actually
+sleeps**, (2) replace the Metal `ApplyBackpressure` 1 ms-`Sleep` poll with an exact-wake primitive
+(`MTLSharedEvent`'s `notifyListener` / `waitUntilSignaledValue`), matching the GL `ClientWait` path; if the
+histogram is near-zero, (2) changes nothing and is not the fix.
+
+### 5e. Two non-invasive reads to close the *narrow* remaining questions *(should not suppress like DevTools/CDP)*
+
+*(The camera pair in §5d is what confirms the fix; these two reads are secondary — they separate which
+sub-mechanism produced the bad phase and would corroborate the phase story from GPU-process instrumentation.
+Note read #1 shares §1's tracing-suppression caveat, so it is not a substitute for the camera.)*
+
+1. **Re-query the trace you already have** (`IMG_3841`'s `trace_….pftrace`). `CommitPresentedFrameToCA`
+   is traced with arg `now_to_display = (display_time − Now()) µs` (source line in
+   `image_transport_surface_overlay_mac.mm`). In the `combined` windows, histogram `now_to_display`: if a
+   large fraction sits **below ~1500 µs** (inside the latch buffer), the latch-slip pin (5c) is shown
+   *directly* from data already captured. Also check `OnVSyncPresentation`'s `callback_delay`.
+   Perfetto `trace_processor` query:
+   `SELECT ... FROM slice WHERE name='CommitPresentedFrameToCA'` joined to its `now_to_display` arg.
+   **Caveat — this discriminator is contingent on tracing *not* suppressing the bug** (the unresolved §1
+   question): if Perfetto suppresses, the captured present is clean regardless and `now_to_display` shows
+   nothing, so a *negative* result here is uninformative. Lean on the camera pair (§5d) and the histogram
+   (§5e-2), which don't depend on it.
+2. **`chrome://histograms/Gpu.Mac.BackpressureUs`** — recorded around *exactly* the `ApplyBackpressure`
+   wait. Compare a buggy run (DevTools closed, card B visibly jerky) against the DevTools-open control
+   (fresh launch each; confirm card B is still jerky while you read, since it's a passive GPU-process
+   counter, not a capture channel). A **multi-ms tail present only in the buggy run** ⇒ the poll is the
+   amplifier; **both near-zero** ⇒ the backpressure wait is not where the time goes and the bad phase is the
+   free-floating commit itself (the expected result, given §5d already fixed it by re-anchoring the phase).
+
+### 5f. Camera test of the fix — CONFIRMED for card B in A+B *(camera-measured, self-validating pair)*
+
+**`IMG_3848.mov` is the decisive clip.** A single **fixed-camera** (phone on a desk) recording carries
+**both arms**: cycle 1 on **stock Chrome (no flag)**, then Chrome quit and **relaunched with
+`--enable-features=VSyncAlignedPresentation`** for cycle 2 (the relaunch shows in the footage as a ~90 s
+terminal/desk gap, excluded from analysis). Same framing for both arms, so **method error is common-mode and
+cancels in the default→flag difference.** Both cadence signals are 240 fps (median step ~4.8 px/frame
+throughout); analysed with the report's own `holds_of`, **segmented per mode** (transition frames excluded;
+rejected short/ramp fires reported).
+
+**Self-validation lives *inside the default arm* — no cross-clip assumption.** Same clip, same (default)
+flag-state, same camera, the method reads bug-from-smooth directly:
+
+| default-arm condition | card | runs | holds | hold=2 (adv/refresh) | hold≥4 (held) | odd |
+|---|---|---:|---:|---:|---:|---:|
+| **A + B** (bug condition) | **B** | 4 | 203 | **60 %** | 37 % | 2 % |
+| **two transforms** (smooth control) | B | 3 | 131 | **86 %** | 8 % | 5 % |
+| color (bug condition) | B | 2 | 97 | 49 % | 42 % | 8 % |
+
+A+B reads **60 %** and two-transforms **86 %** *in the same breath* — a 26-point split that proves the method
+resolves **bug from smooth on this exact framing** (and retires the `IMG_3847` worry that it might "read
+everything ~88 %"). A+B's 60 % also matches the known bug (README "both" 54–59 %; §3 52 %).
+
+**The flag lifts A+B / card B to that smooth-control level:**
+
+| A + B, card B | runs | holds | hold=2 | hold≥4 | odd |
+|---|---:|---:|---:|---:|---:|
+| **default** (bug) | 4 | 203 | **60 %** | 37 % | 2 % |
+| **+ `VSyncAlignedPresentation`** | 3 | 187 | **87 %** | 12 % | 1 % |
+
+87 % sits at this clip's smooth ceiling (two-transf-default 86 %, B-only-flag 90 %) and is **hold=2-dominant**
+(162 of 187 holds), so the flag restored a **true ~120 Hz advance, not a regularised ~60 Hz** (which reads
+hold=4-dominant).
+
+> **Camera-confirmed (scoped):** for **card B in the A+B bug condition**,
+> `--enable-features=VSyncAlignedPresentation` restores the present cadence from **bug-level 60 %** (matching
+> the in-clip default bug) to **smooth-control-level 87 %** hold=2 — a genuine fix, not a 60 Hz regularisation,
+> and not observer suppression (the external camera is the one channel proven not to suppress). Fixed camera,
+> odd-holds 1–2 %.
+
+**Scope — what is NOT (yet) confirmed:**
+- **busywork / color under the flag are inconclusive**, not confirmed. Cycle 2 was cut short, leaving the
+  flag arm with **busywork = 1 valid run (65 %, + 3 rejected short fires)** and **color = absent**. One
+  under-sampled run can neither confirm nor refute those modes; a completed cycle-2 re-run would settle them.
+  The confirmation is scoped to **A+B / card B**. (Default-arm busywork read 69 %, color 49 % — both show the
+  bug on default; only their flag arms are missing.)
+- **Card A (layout) is indicative only and does *not* reach card B's smoothness:** A+B default 34 % → flag
+  57 % hold=2. But card A's travel (248–276 px vs card B's ~316–345) shows the **card-A crop clips**, so those
+  numbers are soft — read only the direction: **the flag does not make the layout animation smooth**,
+  consistent with card A carrying its own residual (main-thread layout) irregularity, not only a present-phase
+  loss. This **overturns `IMG_3847`'s handheld reading** that card A looked "also fixed" at 88 % — a flagged
+  artifact, now corrected by the fixed-camera clip.
+
+**Validity checks (both pass):** the crop **survived the relaunch** — a cycle-2 A+B frame shows card B inside
+its box mid-travel; **both arms are fresh launches**, so the flag is the only systematic difference; and the
+conclusion is **non-circular** because the default arm *independently reproduces the bug* (the flag-state is
+the user's, but the 60 % is measured, not assumed).
+
+**Method validated against published ground truth (no new footage) — and it re-reads the 87 %.** Running the
+report's own `track_cadence.py` on the README's local clips reproduces every published number *exactly*: the
+**DevTools-open control (`IMG_3833`) reads 97 %** (histogram `2→138 4→2 6→2`), and the headline (`IMG_3836`)
+reads **B-alone 98 %, A-alone 59 %, both 54 %** — down to the histograms. Two consequences: (1) the **counting
+is ground-truth-correct** — the exact concern behind "is the method or the count wrong?" is answered by
+reproducing the published range 54 %→98 %; (2) since the same pipeline reads a *genuinely* smooth condition
+at **97 %**, it is **not capped at ~87 %** — so `IMG_3848`'s ~87 % ceiling is **footage** (desk vs
+tripod-sharp), not method. This re-reads the fix result: flag-A+B's **87 % sits at *this clip's* smooth
+ceiling** (two-transf-default 86 %, B-only-flag 90 %), so the flag restores card B to the smooth level of this
+footage — a **floor→ceiling** move (60→87), not a partial fix; on tripod-sharp footage the same method would
+score it ~97 %. (This also validates the `IMG_3848` per-mode pipeline, which reuses the same `holds_of`.)
+
+**`IMG_3847.mov`** (the earlier **handheld, flag-only** clip) remains the **by-eye first look**: all modes
+looked smooth and card B was directionally hold=2-dominant. But its handheld cadence numbers (odd-holds
+7–10 %, card-B B-only misread at 64 %, card-A at 88 %) are **superseded for measurement by `IMG_3848`**
+(odd-holds 1–2 %). Keep it as the qualitative first pass; the numbers come from the fixed-camera pair.
+
+**Cross-check — DevTools-open suppression on the new harness (`IMG_3850.mov`).** A third clip, **DevTools open
+throughout** (intentional), single pass through the six modes, reads A+B **card B = 93 %** and **card A =
+94 %** — so *opening DevTools alone* takes A+B card B from the bug's 60 % to 93 %, reproducing the README's
+DevTools-suppression control (97 %, `IMG_3833`) on `diagnostic.html` with a different camera. The four
+conditions line up coherently:
+
+| A + B, card B | hold=2 | source |
+|---|---:|---|
+| default (bug) | **60 %** | IMG_3848 |
+| + flag | **87 %** | IMG_3848 |
+| DevTools open | **93 %** | IMG_3850 |
+| DevTools open, index.html (README control) | 97 % | IMG_3833 ✓ |
+
+Two consequences: **(1) footage sets the *absolute ceiling*** (handheld/desk ~86–93 %, tripod-sharp ~97 %) —
+poor footage *compresses* the ceiling but **preserves the bug-vs-smooth contrast** (the method still reads bug
+60 % and smooth 86–93 % in the same clip), so the within-clip 60→87 confirmation is robust; the absolute "12 %
+gap from 100" at flag is footage, not residual bug (this clip's genuinely-smooth two-transforms reads the same
+86 %). **(2) card A (layout)** looked left behind (flag 57 % vs DevTools 94 %) — but that 57 % was **crop
+clipping** (see next), not a real residual.
+
+**Card A resolved — the flag fixes the layout animation too (`IMG_3852.mov`).** The `IMG_3848` card-A crop
+clipped the travel (248 px vs the true ~475), which inflated card A's held fraction — a textbook
+"rectangle doesn't cover full travel → motion read as stillness" error. A closer clip with a **full-travel
+card-A crop** (travel 471 px, verified) measures, at A+B:
+
+| A + B | card B | card A |
+|---|---:|---:|
+| **flag only** | **91 %** | **91 %** |
+| flag + DevTools | 88 % | 88 % |
+
+**Card A tracks card B exactly** — 91 % = 91 % under flag-only, 88 % = 88 % under flag+DevTools. So the flag
+brings the **layout** animation to the *same* smooth level as the compositor one; it does **not** leave card A
+behind. (Default card A is ~55 %, README both-A 54 % / A-alone 59 %, so the flag lifts it ~55 %→91 %, same as
+card B.) And **flag-only ≈ flag+DevTools**, so **DevTools adds nothing beyond the flag** — the flag alone
+fully fixes the present. Mechanistically consistent: both animations present through the same CALayer commit,
+so re-aligning that commit fixes both. The earlier "flag fixes only the compositor animation" reading is
+**withdrawn** — it was the clipped crop.
+
+---
+
+## What is resolved / still open
+
+**Resolved**
+- Not Chrome's compositor scheduling or Viz frame-interval selection *(trace-measured)*.
+- Below `SwapBuffers`, in the macOS present path *(trace-measured + inferred)*.
+- Trigger = per-frame main-thread work (contention *or* commit); **not** compositor-layer concurrency
+  *(visually observed)*.
+- **Rate-dependent**: nearly smooth at 60 Hz (~8–16 % held) vs ~52 % held at 120 Hz; card B's present
+  pinned near ~55 Hz *(camera-measured, self-validating clip)*.
+- **macOS-specific**: Firefox does not reproduce (README); **Windows @ 144 Hz is smooth** *(visual)* —
+  so it is the macOS present path, not high rate per se.
+- **Metal present path specifically** *(visual, flag sweep §4)*: reproduces only on the default
+  ANGLE-Metal present; software compositing and ANGLE-OpenGL both remove it, and no Metal-internal knob
+  (gpu-vsync, Skia raster, remote-CoreAnimation) toggles it off. → fix target = the Metal CALayer
+  commit / CoreAnimation present.
+- **Trigger + commit machinery localised in code** *(source-readable, §5)*: the default macOS present
+  commits the CALayer tree **synchronously and non-vsync-aligned** (`kVSyncAlignedPresentation` off by
+  default), so the commit phase free-floats; a documented **~1.5 ms latch deadline** (`GetDisplaytime`)
+  slips any late commit to the next refresh. The trigger (§5c) is the Viz begin-frame deadline pushing
+  `DrawAndSwap` late under a main-thread producer (cross-platform).
+- **Localised below `SwapBuffers` a second, independent way** *(source-readable + visually observed, §5d)*:
+  `--enable-features=VSyncAlignedPresentation` acts *entirely* in the present/commit path below `SwapBuffers`,
+  and it removes the visible jerk — so the localisation below `SwapBuffers` **no longer rests on the
+  possibly-suppressed Perfetto trace** (§1). This much holds regardless of the fix-vs-suppression question.
+- **Pin = the commit's phase vs the display refresh — source-predicted AND camera-confirmed for card B/A+B**
+  *(§5d source; §5f camera)*: the flag changes only *when* the identical commit issues. The fixed-camera
+  default-vs-flag pair (`IMG_3848`) shows card B in A+B going from an in-clip-validated **bug-level 60 %** to
+  **smooth-control 87 %** hold=2 (hold=2-dominant → true ~120 Hz). So the free-floating commit crossing the
+  ~1.5 ms latch deadline is the pin, and commit-phase alone cures it — a **user workaround** and the
+  **upstream fix target**.
+
+**Open**
+- **Fix vs suppressor #4 — RESOLVED for A+B (card B *and* card A)** *(§5f)*. The camera pair confirms the fix
+  for **card B in A+B** (default 60 % → flag 87 % hold=2, self-validated in-clip against two-transf 86 %); the
+  full-travel clip `IMG_3852` extends it to **card A** (flag-only 91 % = card B 91 %) — the flag fixes the
+  layout animation too; the earlier card-A residual was crop-clipping. **Still open:** the flag arms for
+  **busywork and color** were left under-sampled/absent by short cycles (busywork-flag confirmed at 90 % in
+  `IMG_3852` though; only color under flag stays thin) — minor, a completed cycle would close them.
+- **GL doesn't reproduce the A+B coupling — now MEASURED (`IMG_3855`), and the *why* is inside ANGLE**
+  *(camera-measured + source-readable, §5g)*. A `chrome://gpu`-verified Metal-vs-GL pair (cycle 1
+  `ANGLE_METAL`, cycle 2 `ANGLE_OPENGL` — both confirmed on-screen), same fixed camera, DevTools closed, no
+  flag:
+
+  | mode, card B | Metal | GL |
+  |---|---:|---:|
+  | **A+B** | **75 %** (23 % held) | **93 %** (4 % held) |
+  | busywork | 77 % | 90 % |
+
+  So **GL avoids the compositor-inheritance coupling** (card B stays smooth in A+B *and* busywork),
+  confirming it is **Metal-specific** (Metal-bug self-validated in-cycle by `color/Metal` = 58 % held-heavy
+  and the smooth control `two-transf/Metal` = 91 %). **Correction to an earlier over-read:** the §4 by-eye
+  "GL single-card judder" was **not** re-confirmed here — GL `B-only` fell in a slow-mo *ramp* (medstep
+  13.8 px, sub-240 fps → rejected), and GL `A-only` card A = 58 % is **indistinguishable from the normal
+  layout irregularity** (README A-alone 59 %), *not* a GL quirk. So the measured story is simply: **GL
+  removes the coupling.** Whether GL is a clean general workaround is unresolved by this clip (the §4 judder
+  stays by-eye, and §4's software A+B ≈ 23 % held shows software isn't clean either) — which is why the
+  Metal-side `VSyncAlignedPresentation` flag remains the fix, not a backend switch. The
+  **presenter is the same for both backends** (`CreatePresenter()`, no ANGLE branch), so the GL-vs-Metal
+  divergence is **inside ANGLE's rendering backend** (deep, separate repo) — not worth reading; the *what*
+  is now measured, the *why* is ANGLE-internal. *(Caveat: Metal A+B here was a single clean run at 75 %,
+  milder than `IMG_3848`'s 60 %; the stronger in-clip Metal-bug evidence is `color` = 58 %.)*
+- **Why DevTools / recorder / CDP suppress — source dive done: no single Chrome realignment; it operates
+  through macOS presentation behaviour** *(source-readable + inferred, §5g)*. **In the inspected present-path
+  files, found no capture-specific branch:** no capture/CDP/screencast conditional in the macOS
+  present/commit path; no cadence change in `DisplayScheduler`; the resize → `CATransactionV2 createFencePort`
+  path is **one-time** (reset after one commit, feature-gated) so static docking can't suppress through it;
+  the only capture hook is `display.cc` `should_draw = have_copy_requests || …` — which forces drawing
+  *undamaged* frames under a `CopyOutputRequest` (**throughput, not commit phase**), and is capture-specific
+  (the Elements panel issues no CopyOutputRequest, yet "any panel" suppresses). *(Absence of evidence in the
+  files read, not proof no branch exists — a whole-tree grep needs the checkout.)* **Strong constraint:** a
+  **ScreenCaptureKit recorder touches zero Chrome code** yet suppresses — which **strongly suggests the
+  suppressor operates through macOS display/presentation behaviour** (WindowServer / CoreAnimation /
+  DisplayLink cadence) rather than a DevTools-specific Chromium code path. Note it need not be *beneath*
+  Chrome: macOS may simply feed Chromium's present **different inputs** (e.g. a different DisplayLink callback
+  cadence/phase), changing behaviour with the code unchanged. → The suppressors are **not** "accidental copies
+  of the flag's code path"; they **share the *locus*, not the implementation** — the **macOS CALayer commit →
+  CoreAnimation present handoff**, where the flag and the bug also live. Direct readable test (needs a trace):
+  whether DevTools shifts `CommitPresentedFrameToCA`'s `now_to_display` past the ~1.5 ms latch (§5e-1),
+  standing tracing caveat.
+- **Backpressure poll: factor or not** — expected non-factor (§5c). One passive read settles it:
+  `Gpu.Mac.BackpressureUs` ≈ 0 on the buggy default run ⇒ excluded.
+- **Variable vs fixed refresh**: the macOS 120 Hz tested is ProMotion (variable); the 60 Hz was stable.
+  A *fixed* 120 Hz macOS panel (non-ProMotion) is untested, so "variable-refresh" is not isolated from
+  "high rate" on macOS.
+- **Does Perfetto tracing suppress?** Not cleanly resolved (camera for the trace clip was too noisy).
+
+**Next candidate steps**
+- **Report upstream now — the core claim is camera-confirmed.** File: repro + camera cadence (README) +
+  source localisation to the non-vsync-aligned macOS CALayer commit (§5) + the **`IMG_3848` default-vs-flag
+  pair confirming `--enable-features=VSyncAlignedPresentation` restores card B's A+B present from 60 % to
+  87 % hold=2** (§5f). Frame the flag as **both the confirmation and the shipping mitigation/fix target**, and
+  flag the DevTools/recorder/CDP suppression up front — it is why this went unreported.
+  - **Prior-art context (strengthens the report).** The fix flag is **not a bespoke workaround** — it is an
+    existing, implemented, **disabled-by-default** feature (`kVSyncAlignedPresentation`, `IsVSyncAligned()`)
+    that defers the CALayer commit to the display-link callback. It sits in an **active, defaults-off macOS
+    high-refresh/ProMotion present overhaul**: the CADisplayLink migration ("Support CADisplayLink on Mac",
+    commit `c920f54`, bug 40062488, disabled-by-default, macOS 14+, 2024) under the ProMotion umbrella
+    **issue 40202100**. So the bug is best framed as *"the default (non-vsync-aligned, CVDisplayLink) present
+    path drops compositor-animation cadence on ProMotion under concurrent per-frame main-thread work; the
+    in-development vsync-aligned path already fixes it — here is a minimal camera-measured repro, the exact
+    trigger, and the exact toggle."* Note that the scrolling-only variant `kVSyncAlignedPresentationForScrolling`
+    is **on by default** — the team already ships vsync-aligned present for the scroll case, just not generally.
+    *(Verified public: CADisplayLink feature status + umbrella issue. Inferred: `kVSyncAlignedPresentation` is
+    part of the same effort — its own CL/issue wasn't readable, the tracker requires sign-in.)* Separately,
+    input issue **40375001** ("vsync-aligned input") was checked and is **unrelated** — Internals→Input→Touch
+    pipeline (MotionEventBuffer, input resampling), *before* the renderer; zero presentation-path terms. Only
+    the name "vsync-aligned" overlaps.
+- **Optional: complete cycle 2** (busywork + color under the flag, a few clean fires each) to extend the
+  confirmation beyond A+B to the other bug conditions. Not required for the core claim.
+- **Passive histogram** `Gpu.Mac.BackpressureUs` on the buggy default run — excludes the backpressure poll.
+- `rAF`-synced vs constant background main-thread load — sharpens "busy per frame" vs "busy near vsync".
+
+---
+
+## Method caveats
+
+- The trace and discriminator clips (`IMG_3841`, `IMG_3842`) were **handheld with soft focus**. Camera
+  shake in the card region was validated as negligible, but **exposure straddling + soft focus** made
+  per-frame sub-pixel cadence tracking unreliable (odd-hold fraction far above the README's clean-run
+  standard). No cadence **number** comes from those two clips.
+- The refresh-rate clip (`IMG_3844`, §3) was also handheld, but its numbers are trusted because it is
+  **self-validating** — its 120 Hz swing reproduces the known ~46 % bug — and the 60 Hz step (~9 px) is
+  large enough to track cleanly.
+- The reliable signals in this phase are therefore **(a)** the trace (Chrome-internal, microsecond
+  timestamps, immune to camera focus), **(b)** direct **visual** observation of jerkiness (gross and
+  eye-visible — the same basis the README uses for the Firefox and Windows contrasts), and **(c)** the
+  self-validating §3 rate comparison.
+- The clean, sampling-gated **absolute** percentages remain those in the top-level `README.md` (tripod,
+  sharp); §3's figures are quoted as a *within-clip, method-validated comparison*, not new headline rates.

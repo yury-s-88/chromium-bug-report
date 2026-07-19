@@ -19,6 +19,45 @@ Firefox on the same machine and display does not reproduce it.
 
 ---
 
+## Update — root cause localised and a fix confirmed *(follow-up)*
+
+A follow-up diagnostic phase — full methodology, a Chromium source dive, and additional camera
+measurements — localised the cause and confirmed a fix. Details and per-claim evidence standards are in
+[`diagnostic-findings.md`](diagnostic-findings.md); the essentials:
+
+* **A fix already exists in Chromium, disabled by default.** Launching with
+  **`--enable-features=VSyncAlignedPresentation`** makes the animation smooth — **reproducible by anyone on a
+  ProMotion Mac, no footage required.** The flag switches the macOS present to defer the CALayer commit to
+  the display-link (vsync) callback instead of committing at a free-floating moment. Its scrolling-only
+  sibling `kVSyncAlignedPresentationForScrolling` is **on by default**, so Chrome already vsync-aligns the
+  present for scrolling — just not for general animation. The bug lives in exactly that gap.
+
+* **Mechanism (localised; source-readable + inferred).** The default macOS present commits the CALayer tree
+  synchronously and *not* vsync-aligned; a documented ~1.5 ms latch deadline slips any late commit to the
+  next refresh. Concurrent per-frame main-thread work pushes the commit late (via the Viz begin-frame
+  deadline), so it crosses the deadline and is presented one refresh later — the irregular cadence measured
+  below. The loss is at the **macOS CALayer commit → CoreAnimation present** handoff, not in Chrome's
+  compositor scheduling (a Perfetto trace runs clean at ~120 Hz through `SwapBuffers`).
+
+* **Metal-specific.** The coupling reproduces only on the default **ANGLE-Metal** present. On **ANGLE-OpenGL**
+  (`--use-angle=gl`) and **software compositing** it is absent (camera-measured follow-up: OpenGL keeps the
+  concurrent `transform` smooth in A+B where Metal degrades it). Neither is a usable *workaround*, though —
+  software raster is slow and OpenGL showed its own single-card judder by eye — so the Metal-side flag above,
+  not a backend switch, is the fix. This points at the **Metal → CoreAnimation** present.
+
+* **Camera confirmation.** A fixed-camera *default-vs-flag* pair confirmed the flag restores the near-120 Hz
+  cadence for **both** the compositor (`transform`) and the layout (`max-width`) animation.
+
+> These follow-up camera clips are **not published** — they are trivially reproducible (an iPhone in
+> slow-motion plus the flag). Their numbers are follow-up detail, **not** the headline re-derivable
+> measurements below, which remain those from the three published clips. The one claim here that needs no
+> footage at all is the flag test itself: **enable the flag, and the bug disappears.**
+
+Likely the same area as Chromium's in-progress ProMotion present work
+([crbug 40202100](https://issues.chromium.org/issues/40202100)).
+
+---
+
 ## Observation
 
 With DevTools closed, on a 120 Hz ProMotion Mac:
@@ -48,9 +87,11 @@ With DevTools closed, on a 120 Hz ProMotion Mac:
 
 ## What the evidence does **not** establish
 
-* **Where** in the pipeline the visual states are lost — the measurements do not distinguish between
-  states never being painted, being coalesced before paint, being lost during raster/commit, being dropped
-  in compositor submission, or being discarded at final presentation.
+* **Where** in the pipeline the visual states are lost — *the published measurements below* do not
+  distinguish between states never being painted, being coalesced before paint, being lost during
+  raster/commit, being dropped in compositor submission, or being discarded at final presentation. *(The
+  follow-up phase — see the **Update** above and `diagnostic-findings.md` — narrows this to the macOS CALayer
+  commit / CoreAnimation present, corroborated by the fix flag.)*
 * That Chromium **completed and then discarded finished frames**. A `requestAnimationFrame` callback and a
   DOM write do not imply that style → layout → paint → raster → commit ran for that state; several DOM
   updates can be coalesced into one paint. Everything below is therefore reported as

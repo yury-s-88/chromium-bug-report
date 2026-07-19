@@ -1,0 +1,303 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Diagnostic harness — localising the ProMotion cadence loss (NOT the canonical repro)</title>
+
+<!--
+  DIAGNOSTIC HARNESS.  This is NOT the bug report's repro — that is index.html, and it stays
+  untouched as the canonical minimal case.  This page exists to answer one question the repro
+  cannot: WHERE the 120 Hz presentation cadence is lost when a main-thread animation runs beside
+  a compositor-eligible transform.
+
+  It reuses index.html's exact card geometry (A: max-width 400→1000px linear 600ms; B: transform
+  translateX(-300px) linear 600ms) and its windowed-run structure, so analysis/track_cadence.py
+  and analysis/decode_frame_ids.py apply unchanged — only the crop rectangles must be re-found
+  (the layout differs from index.html; re-frame per session as usual).
+
+  TWO THINGS TO KEEP IN MIND WHILE USING THIS PAGE
+  ────────────────────────────────────────────────
+  1. The rAF histogram at the bottom is a CONTROL, not a detector.  rAF *callback* cadence holds
+     ~120 Hz in every condition (README establishes this; the Stage-1 baseline confirmed it).  If
+     THIS ever drops, the problem is upstream of presentation — main-thread scheduling — not the
+     effect we are chasing.  The bug lives in PRESENTATION, which only the external camera sees.
+
+  2. On-machine observation suppresses the bug.  DevTools, ScreenCaptureKit/OBS and CDP are all
+     confirmed to suppress it; Perfetto/system tracing is UNTESTED.  So a clean trace proves
+     nothing until you have first shown — from the camera — that the irregular cadence SURVIVES
+     while the trace is being recorded.  Do that before trusting any trace.
+
+  WHY THE DISCRIMINATOR MODES MATTER
+  ──────────────────────────────────
+  They test the working hypothesis ("a non-composited animation's ~80 Hz commit cadence is applied
+  to the whole frame sink, throttling the compositor transform") BEHAVIOURALLY, measured by camera,
+  with no dependence on the suppression-prone trace:
+
+    • busywork (no layout)  — main thread is loaded every frame but produces NO commit.
+                              If B still drops → contention, not commit cadence.
+                              If B holds ~115 Hz → contention alone is not enough; a commit is needed.
+    • non-layout write      — a per-frame paint-only commit (color), no layout.
+                              If B drops → ANY main-thread commit throttles it, not specifically layout.
+    • two transforms        — two compositor animations, NO main-thread producer at all.
+                              If both hold ~115 Hz → pure-compositor animations do not throttle each
+                              other; the throttle requires a main-thread frame producer.
+
+  Note on the numbers this is chasing: the README's "54–59%" is the fraction of hold EVENTS that
+  are single-interval, not a duty cycle.  Computed from intervals consumed, the effective visible
+  cadence is ≈115 Hz for B alone falling to ≈78 Hz beside the layout animation — irregular, NOT a
+  clean 60 Hz.  A clean preferred-interval throttle to 60 Hz would show regular hold=4 everywhere;
+  the mode is hold=2.  So "clean 60 Hz cap" is out; irregular frame-interval logic on a VRR panel
+  is not.  Localising the stage is the point of this page.
+
+  FULL WRITE-UP:  README.md   ·   ANALYSIS:  analysis/README.md
+-->
+
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 22px; background: #eef0f4;
+    font: 15px/1.55 -apple-system, system-ui, sans-serif; color: #111827;
+    padding: 24px 0;
+  }
+  .block { width: 100%; }
+  .tag {
+    text-align: center; margin-bottom: 6px;
+    font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #6b7280;
+  }
+  .row { display: flex; justify-content: center; }   /* centred → widening moves content horizontally */
+
+  .card {
+    width: 100%; max-width: 400px; box-sizing: border-box;
+    padding: 22px 30px; background: #fff; border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .12); cursor: default; user-select: none;
+  }
+  /* A — max-width is NOT compositable: intermediate values need main-thread style/layout work. */
+  #cardA { transition: max-width 600ms linear; }
+  #cardA.wide { max-width: 1000px; }
+  /* B, C — transform IS compositor-eligible. Same 300px of content motion, same 600ms, same easing. */
+  #cardB, #cardC { transition: transform 600ms linear; }
+  #cardB.shifted, #cardC.shifted { transform: translateX(-300px); }
+
+  ul { margin: 0; padding-left: 20px; }
+  li { white-space: nowrap; }   /* keep line structure constant so what moves is content, not reflow */
+
+  /* controls */
+  #panel {
+    display: flex; flex-direction: column; gap: 10px; align-items: center;
+    padding: 14px 18px; background: #fff; border: 1px solid #d1d5db; border-radius: 10px;
+    max-width: 760px;
+  }
+  #modes { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; }
+  #modes label { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
+  #modes input { margin: 0; }
+  #buttons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  button {
+    padding: 7px 14px; border: 1px solid #d1d5db; border-radius: 8px;
+    background: #fff; cursor: pointer; font: inherit; font-size: 13px;
+  }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #ctrl { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b7280; cursor: pointer; }
+  #ctrl input { margin: 0; }
+  #what { font-size: 12px; color: #6b7280; text-align: center; max-width: 720px; min-height: 2.6em; }
+
+  /* rAF id stamp — for external-camera decoding (analysis/decode_frame_ids.py). Off by default. */
+  #fc {
+    position: fixed; top: 22px; right: 22px;
+    padding: 10px 14px; border-radius: 10px; background: #fff;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .15); text-align: center;
+  }
+  #fcNum { font: 700 34px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+           font-variant-numeric: tabular-nums; letter-spacing: 2px; color: #111; }
+  #fcBits { display: flex; gap: 4px; margin-top: 8px; }
+  #fcBits i { width: 22px; height: 22px; border: 2px solid #111; background: #fff; }
+  #fcBits i.on { background: #111; }
+
+  /* paint-only probe for the "non-layout write" discriminator. position:fixed, fixed width →
+     changing its color cannot alter the cards' geometry (paint invalidation, never layout). */
+  #paintProbe {
+    position: fixed; top: 22px; left: 22px; width: 90px; text-align: center;
+    font: 700 20px/1 ui-monospace, monospace; color: #e5e7eb; user-select: none;
+  }
+
+  #hint { text-align: center; font-size: 13px; color: #6b7280; max-width: 720px; }
+  #rafctl {
+    position: fixed; left: 14px; bottom: 14px;
+    padding: 8px 10px; border-radius: 6px; background: #111; color: #0f0;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre;
+  }
+</style>
+
+<div id="hint">
+  <b>Diagnostic harness</b> — not the repro (that's <code>index.html</code>). Pick a mode, then
+  <b>Fire once</b> (one 600 ms run, for camera cadence) or <b>Loop</b> (repeated runs, for a trace).
+  The green box is the rAF <b>control</b>, not the detector.
+</div>
+
+<div class="block">
+  <div class="tag">A · max-width 400 → 1000px — LAYOUT (main thread)</div>
+  <div class="row"><div class="card" id="cardA"><ul><li>Alpha</li><li>Bravo</li><li>Charlie</li><li>Delta</li><li>Echo</li></ul></div></div>
+</div>
+<div class="block">
+  <div class="tag">B · transform: translateX(-300px) — COMPOSITOR-ELIGIBLE</div>
+  <div class="row"><div class="card" id="cardB"><ul><li>Alpha</li><li>Bravo</li><li>Charlie</li><li>Delta</li><li>Echo</li></ul></div></div>
+</div>
+<div class="block">
+  <div class="tag">C · transform: translateX(-300px) — second COMPOSITOR-ELIGIBLE animation</div>
+  <div class="row"><div class="card" id="cardC"><ul><li>Alpha</li><li>Bravo</li><li>Charlie</li><li>Delta</li><li>Echo</li></ul></div></div>
+</div>
+
+<div id="panel">
+  <div id="modes">
+    <label><input type="radio" name="mode" value="transform" checked> B transform only</label>
+    <label><input type="radio" name="mode" value="maxwidth"> A max-width only</label>
+    <label><input type="radio" name="mode" value="combined"> A + B (the bug condition)</label>
+    <label><input type="radio" name="mode" value="busywork"> B + main-thread busywork (no layout)</label>
+    <label><input type="radio" name="mode" value="paintcommit"> B + non-layout write (color)</label>
+    <label><input type="radio" name="mode" value="twotransform"> two transforms (B + C)</label>
+  </div>
+  <div id="buttons">
+    <button id="fire">▶ Fire once</button>
+    <button id="loop">⟳ Loop</button>
+    <button id="stop" disabled>■ Stop</button>
+    <label id="ctrl"><input type="checkbox" id="stampOn"> stamp rAF id (for camera decode)</label>
+  </div>
+  <div id="what"></div>
+</div>
+
+<div id="paintProbe">▮▮▮</div>
+<div id="fc" hidden>
+  <div id="fcNum">000</div>
+  <div id="fcBits"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+</div>
+<div id="rafctl">pick a mode · Fire once</div>
+
+<script>
+  const $  = id => document.getElementById(id);
+  const cardA = $('cardA'), cardB = $('cardB'), cardC = $('cardC');
+  const fc = $('fc'), fcNum = $('fcNum'), bits = [...document.querySelectorAll('#fcBits i')];
+  const stampOn = $('stampOn'), paintProbe = $('paintProbe');
+  const fireBtn = $('fire'), loopBtn = $('loop'), stopBtn = $('stop');
+  const what = $('what'), rafctl = $('rafctl');
+
+  const WINDOW_MS = 700;    // per run: 600 ms animation + margin (matches index.html)
+  const GAP_MS    = 500;    // idle gap between looped runs, so each is a clean detectable run
+  const BUSY_MS   = 4;      // per-frame main-thread burn for the "busywork" mode. Tunable — a
+                            // value near the 8.3 ms frame budget will itself stall rAF, which the
+                            // control below will show. It is deliberately BELOW that here.
+
+  // Triggers. These TOGGLE, so a looped mode alternates forward/back — each direction is a full
+  // 600 ms animated run, and track_cadence.py uses |displacement|, so the reversal is immaterial.
+  const fireA  = () => cardA.classList.toggle('wide');
+  const fireB  = () => cardB.classList.toggle('shifted');
+  const fireC  = () => cardC.classList.toggle('shifted');
+
+  // Per-frame main-thread work for the discriminator modes (runs only during the 600 ms window).
+  const busy = () => { const t = performance.now(); while (performance.now() - t < BUSY_MS) {} };
+  let paintState = false;
+  const paint = () => { paintState = !paintState; paintProbe.style.color = paintState ? '#111' : '#e5e7eb'; };
+
+  const MODES = {
+    transform:    { run: fireB,                    perFrame: null,  needsWide: false,
+                    desc: 'Compositor transform alone. Baseline: camera-measured ≈115 Hz effective. Everything below is compared against this.' },
+    maxwidth:     { run: fireA,                    perFrame: null,  needsWide: false,
+                    desc: 'Layout animation alone. Already irregular by itself (≈84 Hz effective) — the non-composited baseline.' },
+    combined:     { run: () => { fireA(); fireB(); }, perFrame: null, needsWide: true,
+                    desc: 'The bug condition. B is expected to fall from ≈115 Hz to ≈78 Hz, inheriting A’s irregular cadence.' },
+    busywork:     { run: fireB,                    perFrame: busy,  needsWide: false,
+                    desc: 'B transform + a main-thread busy-loop each frame that writes NO layout property. B still drops ⇒ contention; B holds ⇒ a commit is needed, not just a busy main thread.' },
+    paintcommit:  { run: fireB,                    perFrame: paint, needsWide: false,
+                    desc: 'B transform + a per-frame color change (paint-only commit, no layout). B drops ⇒ any main-thread commit throttles it; B holds ⇒ specifically layout matters.' },
+    twotransform: { run: () => { fireB(); fireC(); }, perFrame: null, needsWide: false,
+                    desc: 'Two compositor animations, NO main-thread producer. Both hold ≈115 Hz ⇒ pure-compositor animations don’t throttle each other; the throttle needs a main-thread frame producer.' },
+  };
+
+  const mode = () => document.querySelector('input[name=mode]:checked').value;
+
+  // ── width guard (same reasoning as index.html) ────────────────────────────────────────────
+  // Card A only travels 300px if it can reach max-width:1000px; in a narrow window the A/B
+  // comparison is void. Disable ONLY the modes where A's travel must equal B's (combined).
+  let comparisonValid = false;
+  function checkWidth() {
+    const avail = cardA.parentElement.clientWidth;
+    comparisonValid = avail >= 1000;
+    document.querySelector('input[value=combined]').disabled = !comparisonValid;
+    if (mode() === 'combined' && !comparisonValid) {
+      document.querySelector('input[value=transform]').checked = true;
+    }
+    describe();
+  }
+  function describe() {
+    const m = MODES[mode()];
+    what.textContent = m.desc + (m.needsWide && !comparisonValid
+      ? '  ⚠️ window too narrow: card A cannot reach 1000px, comparison disabled — widen the window.' : '');
+  }
+  window.addEventListener('resize', checkWidth);
+  document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', describe));
+  stampOn.addEventListener('change', () => { fc.hidden = !stampOn.checked; });
+
+  // ── run engine ─────────────────────────────────────────────────────────────────────────────
+  let looping = false, stopRequested = false, loopTimer = null, busyRun = false;
+
+  function renderStamp(n) {
+    fcNum.textContent = String(n).padStart(3, '0');
+    for (let b = 0; b < 8; b++) bits[b].classList.toggle('on', !!(n & (1 << (7 - b))));
+  }
+
+  function renderControl(samples, n) {
+    if (!samples.length) { rafctl.textContent = '—'; return; }
+    const bins = { '<10': 0, '10-14': 0, '14-20': 0, '>20': 0 };
+    for (const v of samples) {
+      if (v < 10) bins['<10']++; else if (v < 14) bins['10-14']++;
+      else if (v < 20) bins['14-20']++; else bins['>20']++;
+    }
+    const med = [...samples].sort((a, b) => a - b)[samples.length >> 1];
+    rafctl.textContent =
+      `rAF CONTROL (not the detector)\n` +
+      `median ${med.toFixed(1)} ms · ~${(1000 / med).toFixed(0)} Hz · n=${samples.length}\n` +
+      Object.entries(bins).map(([k, v]) => `${k}ms: ${v}`).join('  ') +
+      (n ? `\nrAF ids issued 001..${String(n).padStart(3, '0')}` : '');
+  }
+
+  // One windowed run: mirrors index.html's measureRaf so decode_frame_ids.py sees the same
+  // 001..N-per-run id sequence (n resets each run ⇒ a clean reset the decoder can cut on).
+  function runWindow() {
+    const m = MODES[mode()];
+    if (m.needsWide && !comparisonValid) { stopAll(); return; }
+    const doStamp = stampOn.checked, doWork = m.perFrame, tag = mode();
+    const t0 = performance.now(), samples = [];
+    let prev, n = 0;
+
+    performance.mark(`${tag}-start`);
+    m.run();                                   // trigger the CSS animation(s)
+
+    function tick(now) {
+      if (prev !== undefined) samples.push(now - prev);
+      prev = now;
+      if (doStamp) { n++; renderStamp(n); }    // one main-thread DOM write per frame — perturbs; camera-decode only
+      if (doWork) doWork();                    // discriminator load, only inside the animated window
+
+      if (now - t0 < WINDOW_MS) { requestAnimationFrame(tick); return; }
+
+      performance.mark(`${tag}-end`);
+      performance.measure(tag, `${tag}-start`, `${tag}-end`);   // shows under User Timing in a trace
+      renderControl(samples, doStamp ? n : 0);
+      if (looping && !stopRequested) loopTimer = setTimeout(() => { if (looping) runWindow(); }, GAP_MS);
+      else stopAll();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function setRunning(on) {
+    busyRun = on;
+    fireBtn.disabled = on; loopBtn.disabled = on; stopBtn.disabled = !on;
+    document.querySelectorAll('input[name=mode]').forEach(r => {
+      r.disabled = on || (r.value === 'combined' && !comparisonValid);
+    });
+  }
+  function stopAll() { looping = false; stopRequested = true; clearTimeout(loopTimer); setRunning(false); }
+
+  fireBtn.addEventListener('click', () => { if (busyRun) return; looping = false; stopRequested = false; setRunning(true); runWindow(); });
+  loopBtn.addEventListener('click', () => { if (busyRun) return; looping = true;  stopRequested = false; setRunning(true); runWindow(); });
+  stopBtn.addEventListener('click', stopAll);
+
+  checkWidth();
+</script>
