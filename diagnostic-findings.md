@@ -697,7 +697,7 @@ repro is squarely inside `is_handling_animation`: card A is `kMainThreadAnimatio
    hops from the commit/callback path "to avoid unnecessary delays" — after the 2025 experiment. So the
    measured cost of alignment today is not necessarily the cost that lost in 2025. *(Inferred.)*
 
-### 7g. A free falsifiable prediction — **PREDICTION HOLDS** *(visually observed; no build, no camera, no flag)*
+### 7g. A free falsifiable prediction — **CONFIRMED** *(visually observed, then camera-free measured; no build, no camera, no flag)*
 
 `kVSyncAlignedPresentationForScrolling` is **on by default** and gates on `data.is_handling_interaction`,
 which is true while the page is **actively being scrolled**. The commit path taken during a scroll is
@@ -732,10 +732,10 @@ compositor is doing more broadly; this is a strong hint, not a single-variable e
 > **card B is smooth while the scroll gesture is in progress.** Predicted from source *before* the test,
 > as in §5d.
 
-**What this buys — and the honest limit.** On the report's own scale this is **visually observed**, and
-"smooth by eye" is this report's declared **suppressor signature** (§5d) — so it does *not* yet stand
-where §5f's camera pair stands. What separates it from suppressors #1–#3 (DevTools / recorder / CDP) is
-the same thing that separated the flag:
+**What this buys.** The by-eye pass alone would have sat on this report's **suppressor signature** tier
+(§5d) — but it has since been **measured on a passive counter** (below), which is the same channel §6 used
+to promote the flag. Three things separate it from suppressors #1–#3 (DevTools / recorder / CDP), and they
+are the same three that separated the flag:
 
 - **It is not an observation channel.** Nothing is capturing the screen. Scrolling is an *input to the
   rendering path*, and there is a **source-readable branch** that predicts this exact result:
@@ -751,11 +751,54 @@ the same thing that separated the flag:
 doing, so this is a **strong corroboration, not a single-variable experiment** like §5f. And macOS itself
 may behave differently during a scroll (the standing worry from the ScreenCaptureKit suppressor, which
 touches zero Chrome code yet suppresses). The difference here is that we have a **readable branch that
-predicts it** and the recorder case did not. **→ Hardening step, ~2 minutes, no camera: re-run the §6
-`chrome://histograms` read while scrolling continuously** — if
-`Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation` collapses from the default ~11.5 towards
-the flag's ~0.1, the result is confirmed on a **passive, non-suppressing counter**, on the same axis and
-against the same published reference numbers as the flag. Until then §7g stays *visually observed*.
+predicts it**, and the recorder case did not — plus a passive-counter measurement that lands on the flag's
+own published number.
+
+> **HARDENED — camera-free confirmation on a passive counter** *(2026-07-19; raw dumps in
+> [`telemetry/`](telemetry/)).* Stock Chrome, **no flag**, A+B on Loop, one monitoring window, two sequential
+> phases — **scrolling throughout, then not scrolling at all**:
+>
+> | `Jank3.CompositorThread.CompositorAnimation` (card B) | n | mean | at zero |
+> |---|---:|---:|---:|
+> | **scrolling** — stock Chrome, no flag | 18 | **0.11** | **94.4 %** |
+> | **not scrolling** — same launch, derived (see below) | 16 | **12.44** | **0 %** |
+> | *published reference: default (§6)* | 75 | *11.5* | *1.3 %* |
+> | *published reference: `--enable-features=VSyncAlignedPresentation` (§6)* | 32 | *0.1* | *90.6 %* |
+>
+> **Scrolling lands on the flag's number; not scrolling lands on the default's.** Not merely "better" —
+> **0.11 vs the flag's 0.1**, and **12.44 vs the default's 11.5**. The two distributions are **completely
+> disjoint**: every scrolled sequence scores ≤ 2, every unscrolled one ≥ 8. **Card A behaves identically**
+> (`MainThread.MainThreadAnimation`: 0.1 / 94.4 % scrolled → 12.4 derived unscrolled), matching §5f's finding
+> that the flag fixes both cards.
+
+**How the unscrolled arm was obtained, and why the subtraction is sound.** The second dump is **cumulative**
+— monitoring was not reset between phases — so the unscrolled arm is `dump2 − dump1`, bucket by bucket. Three
+things make that exact rather than approximate: (1) every bucket of dump 1 appears in dump 2 with a count
+≥ its own (checked); (2) the residual is cleanly separated (buckets 8–18, nothing below 8), so no sample is
+ambiguously assigned; (3) **`Jank3.MainThread.WheelScroll` is byte-identical in both dumps** (n = 9, same
+buckets) — proving no further scrolling occurred in phase 2 *and* that dump 2 genuinely contains dump 1.
+Being one monitoring window also makes this a **paired within-session measurement** — same launch, same
+process, same page instance — so launch-to-launch variance cancels, the same way §5f's single-clip pair
+cancels camera error.
+
+**Caveats, in order of seriousness:**
+
+- **Which of two code branches produced the alignment is not isolated.** `Present()` sets
+  `delay_presentation_until_next_vsync` on default Chrome via *either*
+  `IsVSyncAlignedForScrolling() && data.is_handling_interaction` (the predicted path) *or* the separate
+  `… && NumPendingSwaps() > 1` clause, which is also live by default and could fire more often under scroll
+  load. **Both are the same vsync-aligned commit**, so the *mechanism* conclusion is unaffected — but this
+  measurement does not prove *which predicate* opened the door. Stated rather than glossed.
+- **Order not counterbalanced** (scrolled first, then unscrolled) and **n is small** (18 / 16). The complete
+  separation of the distributions makes drift an implausible explanation, but a reversed-order repeat would
+  close it.
+- **The gesture registered as `MainThread.WheelScroll`** (n = 9, mean 2.3), not `CompositorThread` — a
+  main-thread-repainted scroll. `IsHandlingInteraction()` reads `GetActivelyScrollingType()`, which is set
+  for main-repainted scrolls too (`IsCurrentScrollMainRepainted()` is a *separate* query), so this does not
+  undercut the reading — but it is why the scroll's own jank is 2.3 rather than ~0.
+- Standing `Jank3` caveat (§6): it is computed from Chrome's present **estimate**, so it under-reports
+  magnitude against the camera. Direction and the two-sided landing on published references are what carry
+  here, not absolute magnitude.
 
 **Hardening attempt #1 — REJECTED as pooled** *(logged, not dropped — per this report's own rule that every
 rejected run is reported)*. A first `chrome://histograms` read (2026-07-19) ran **unscrolled first, then
@@ -967,9 +1010,10 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   (= active scroll or touch sequence, `LayerTreeHostImpl::IsHandlingInteraction()`). Predicted from that
   line, then confirmed by eye on **stock Chrome with no flags**: card B is **smooth while a scroll gesture
   is in progress**. So the same animation presents at a true ~120 Hz during a scroll and falls back to the
-  ~55 Hz pin the moment it ends. *(By-eye tier — the report's suppressor signature — but not an observation
-  channel, and the confound adds work rather than removing it; hardening on the passive `Jank3` counter is
-  the named next step.)*
+  ~55 Hz pin the moment it ends. **Now measured on the passive `Jank3` counter, not just seen:** in one
+  monitoring window, scrolling reads **0.11** (94.4 % of sequences at zero) and not-scrolling **12.44**
+  (0 % at zero) — landing on the *published* flag (0.1 / 90.6 %) and default (11.5 / 1.3 %) references
+  respectively, with completely disjoint distributions. Card A behaves identically.
 
 **Open**
 - **Fix vs suppressor #4 — RESOLVED for A+B (card B *and* card A)** *(§5f)*. The camera pair confirms the fix
@@ -1057,14 +1101,11 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
     Ask instead for a **display-refresh-rate-segmented re-evaluation** of the general path — the loss is
     severe at 120 Hz and near-absent at 60 Hz (§3), so a Mac-wide arm dilutes the benefit while the latency
     cost applies uniformly.
-- **Harden §7g on a passive counter** *(~2 minutes, no camera, no flag)* — the §7g scroll prediction **holds
-  by eye**; promote it off the by-eye tier the same way §6 did for the flag: `chrome://histograms` →
-  *Monitoring Mode* → A+B on Loop while **scrolling the §7g box continuously** ~20 s → read
-  `Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation`. Reference points already published:
-  **default ≈ 11.5**, **flag ≈ 0.1**. A collapse towards the flag's value confirms it on a non-suppressing
-  channel. *(Watch for the null case: if scrolling changes which sequence trackers are active and the
-  histogram comes back empty, report that rather than reading a partial bucket.)* Then, optionally, the
-  same clip structure as §3 on camera — jerky / scroll / jerky in **one** clip is self-validating.
+- **§7g is done** — hardened on the passive `Jank3` counter (scrolling 0.11 / 94.4 % at zero vs
+  not-scrolling 12.44 / 0 %, disjoint distributions, both landing on published references). Two optional
+  tighteners remain, neither load-bearing: a **reversed-order repeat** (unscrolled first) to exclude drift,
+  and a **camera clip structured like §3** — jerky / scroll / jerky in one continuous take, which would be
+  self-validating and would give the absolute rate rather than the modelled one.
 - **Optional: complete cycle 2** (busywork + color under the flag, a few clean fires each) to extend the
   confirmation beyond A+B to the other bug conditions. Not required for the core claim.
 - **Passive histogram** `Gpu.Mac.BackpressureUs` on the buggy default run — excludes the backpressure poll.

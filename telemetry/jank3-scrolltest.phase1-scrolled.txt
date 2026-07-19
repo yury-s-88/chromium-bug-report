@@ -1,0 +1,74 @@
+- Histogram: Graphics.Smoothness.Jank3.AllAnimations recorded 54 samples, mean = 0.7 (flags = 0x41) [#]
+
+0  ----------------------------------O                                       (34 = 63.0%)
+1  -O                                                                        (1 = 1.9%) {63.0%}
+2  ------------------O                                                       (18 = 33.3%) {64.8%}
+3  -O                                                                        (1 = 1.9%) {98.1%}
+4  ... 
+
+
+- Histogram: Graphics.Smoothness.Jank3.AllInteractions recorded 9 samples, mean = 2.3 (flags = 0x41) [#]
+
+0  ... 
+2  ------O                                                                   (6 = 66.7%) {0.0%}
+3  ---O                                                                      (3 = 33.3%) {66.7%}
+4  ... 
+
+
+- Histogram: Graphics.Smoothness.Jank3.AllSequences recorded 63 samples, mean = 1.0 (flags = 0x41) [#]
+
+0  ----------------------------------O                                       (34 = 54.0%)
+1  -O                                                                        (1 = 1.6%) {54.0%}
+2  ------------------------O                                                 (24 = 38.1%) {55.6%}
+3  ----O                                                                     (4 = 6.3%) {93.7%}
+4  ... 
+
+
+- Histogram: Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation recorded 18 samples, mean = 0.1 (flags = 0x41) [#]
+
+0  -----------------O                                                        (17 = 94.4%)
+1  O                                                                         (0 = 0.0%) {94.4%}
+2  -O                                                                        (1 = 5.6%) {94.4%}
+3  ... 
+
+
+- Histogram: Graphics.Smoothness.Jank3.CompositorThread.NativePropertyAnimation recorded 18 samples, mean = 0.1 (flags = 0x41) [#]
+
+0  -----------------O                                                        (17 = 94.4%)
+1  O                                                                         (0 = 0.0%) {94.4%}
+2  -O                                                                        (1 = 5.6%) {94.4%}
+3  ... 
+
+
+- Histogram: Graphics.Smoothness.Jank3.MainThread.JSAnimation recorded 18 samples, mean = 2.0 (flags = 0x41) [#]
+
+0  O                                                                         (0 = 0.0%)
+1  -O                                                                        (1 = 5.6%) {0.0%}
+2  ----------------O                                                         (16 = 88.9%) {5.6%}
+3  -O                                                                        (1 = 5.6%) {94.4%}
+4  ... 
+
+
+- Histogram: Graphics.Smoothness.Jank3.MainThread.MainThreadAnimation recorded 18 samples, mean = 0.1 (flags = 0x41) [#]
+
+0  -----------------O                                                        (17 = 94.4%)
+1  O                                                                         (0 = 0.0%) {94.4%}
+2  -O                                                                        (1 = 5.6%) {94.4%}
+3  ... 
+
+
+- Histogram: Graphics.Smoothness.Jank3.MainThread.RAF recorded 18 samples, mean = 2.0 (flags = 0x41) [#]
+
+0  O                                                                         (0 = 0.0%)
+1  -O                                                                        (1 = 5.6%) {0.0%}
+2  ----------------O                                                         (16 = 88.9%) {5.6%}
+3  -O                                                                        (1 = 5.6%) {94.4%}
+4  ... 
+
+
+- Histogram: Graphics.Smoothness.Jank3.MainThread.WheelScroll recorded 9 samples, mean = 2.3 (flags = 0x41) [#]
+
+0  ... 
+2  ------O                                                                   (6 = 66.7%) {0.0%}
+3  ---O                                                                      (3 = 33.3%) {66.7%}
+4  ... 

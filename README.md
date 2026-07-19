@@ -41,6 +41,26 @@ measurements — localised the cause and confirmed a fix. Details and per-claim 
   quotes and the resulting (narrower) upstream ask: **§7 of
   [`diagnostic-findings.md`](diagnostic-findings.md)**.
 
+* **Chrome already contains the fix and already applies it — but only while you are scrolling.** The
+  scroll-only sibling above is gated on `is_handling_interaction`, which cc sets for an **active scroll or
+  touch sequence and nothing else**. Predicted from that line, then measured on the passive `Jank3` counter —
+  **stock Chrome, no flag, no camera, no build**, one monitoring window, A+B running throughout:
+
+  | `Jank3.CompositorThread.CompositorAnimation` (card B) | n | mean | at zero |
+  |---|---:|---:|---:|
+  | **while scrolling** | 18 | **0.11** | **94.4 %** |
+  | **while not scrolling** | 16 | **12.44** | **0 %** |
+  | *reference: default (above)* | 75 | *11.5* | *1.3 %* |
+  | *reference: with the flag (above)* | 32 | *0.1* | *90.6 %* |
+
+  **Scrolling lands on the flag's number; not scrolling lands on the default's**, with completely disjoint
+  distributions (scrolled ≤ 2, unscrolled ≥ 8). Card A behaves identically. So the same animation presents
+  at a true ~120 Hz during a scroll and falls back to the ~55 Hz pin the instant the gesture ends — a
+  user-visible cadence discontinuity produced by the feature gate itself. **This is the cheapest way for a
+  reviewer to see both the bug and Chrome's own fix for it: no flag, no footage, about a minute.** Raw dumps
+  in [`telemetry/`](telemetry/); method, the subtraction that yields the unscrolled arm, and the full caveat
+  list (notably: it does not isolate *which* of two `Present()` branches aligned the commit) in **§7g**.
+
 * **A measurement asymmetry worth stating plainly.** On macOS Chrome does not know when a frame was
   actually presented — it **models** it (`PresentationFeedback` is built from the display-link's *predicted*
   display time), and INP, EventLatency and CompositorLatency are all computed on that model, as are the
