@@ -1063,7 +1063,7 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   **busywork and color** were left under-sampled/absent by short cycles (busywork-flag confirmed at 90 % in
   `IMG_3852` though; only color under flag stays thin) — minor, a completed cycle would close them.
 - **GL doesn't reproduce the A+B coupling — now MEASURED (`IMG_3855`), and the *why* is inside ANGLE**
-  *(camera-measured + source-readable, §5g)*. A `chrome://gpu`-verified Metal-vs-GL pair (cycle 1
+  *(camera-measured + source-readable)*. A `chrome://gpu`-verified Metal-vs-GL pair (cycle 1
   `ANGLE_METAL`, cycle 2 `ANGLE_OPENGL` — both confirmed on-screen), same fixed camera, DevTools closed, no
   flag:
 
@@ -1086,7 +1086,7 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   is now measured, the *why* is ANGLE-internal. *(Caveat: Metal A+B here was a single clean run at 75 %,
   milder than `IMG_3848`'s 60 %; the stronger in-clip Metal-bug evidence is `color` = 58 %.)*
 - **Why DevTools / recorder / CDP suppress — source dive done: no single Chrome realignment; it operates
-  through macOS presentation behaviour** *(source-readable + inferred, §5g)*. **In the inspected present-path
+  through macOS presentation behaviour** *(source-readable + inferred)*. **In the inspected present-path
   files, found no capture-specific branch:** no capture/CDP/screencast conditional in the macOS
   present/commit path; no cadence change in `DisplayScheduler`; the resize → `CATransactionV2 createFencePort`
   path is **one-time** (reset after one commit, feature-gated) so static docking can't suppress through it;
