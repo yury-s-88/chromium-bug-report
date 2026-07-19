@@ -4,12 +4,22 @@ Companion to the top-level `README.md`. The README establishes the bug **at the 
 external 240 fps camera (tripod, sharp). This note records a follow-up diagnostic phase — a Perfetto
 trace, behavioural discriminators, a refresh-rate comparison, a flag sweep, and a **source-level read of
 the macOS present path** (§5) — that narrows *where* the cadence is lost, *what triggers it*, and *the
-code that pins it*.
+code that best accounts for it*.
 
 **As with the README, the standard of evidence is marked explicitly:** *trace-measured*,
 *camera-measured*, *visually observed*, or *inferred*. Most follow-up clips here were handheld with
 soft focus and yield no reliable rate; the exception is the refresh-rate clip (§3), which is
 **self-validating** — its 120 Hz reference reproduces the known bug (see *Method caveats*).
+
+**One further distinction, applied throughout — and it is load-bearing.** *Measurements* are stated flatly.
+*Mechanisms* are not. Where an internal mechanism is supported by camera **and** source **and** a
+near-single-variable flag experiment, but has not been isolated against every alternative, this note says
+**"most consistent with"**, **"strongly indicates"** or **"points to"** rather than "is". The internal
+mechanism here is **very well supported, not proven**, and that gap is precisely what a reviewer is entitled
+to push on — so it is marked rather than smoothed over. Two claim-types are kept apart on purpose: claims of
+**sufficiency** ("re-anchoring the commit phase is enough to cure it") are stated flatly, because that was
+tested directly; claims of **exclusivity** ("nothing else contributes") are never made anywhere in this
+document.
 
 ---
 
@@ -29,7 +39,7 @@ soft focus and yield no reliable rate; the exception is the refresh-rate clip (�
 3. **Rate-dependent, and macOS-specific.** *(camera-measured + visually observed.)* On the same panel
    switched to a fixed **60 Hz**, card B is nearly smooth (~8–16 % of refreshes held) versus **52 %**
    held at 120 Hz — an in-clip control that also *validates the method* (the 120 Hz swing reproduces
-   the known bug). The numbers fit one interpretation: **card B's present is pinned near ~55 Hz
+   the known bug). The numbers fit one interpretation: **card B's present behaves as if pinned near ~55 Hz
    regardless of display rate** — catastrophic-looking at 120 Hz (≈half), nearly fine at 60 Hz (≈full).
    On **Windows @ 144 Hz** the animation is smooth *(visual)*, so it is **not** high refresh rate per
    se — it is the macOS present path.
@@ -38,7 +48,8 @@ soft focus and yield no reliable rate; the exception is the refresh-rate clip (�
 > Per-frame main-thread activity — CPU contention *or* a commit — perturbs the **macOS present** of
 > a compositor animation. Not Chrome's scheduling; not compositor-layer concurrency; the final present.
 >
-> Quantitatively (§3), that perturbation **pins card B's present near ~55 Hz** — a macOS-specific value,
+> Quantitatively (§3), that perturbation leaves card B presenting **as if pinned near ~55 Hz** — a
+> macOS-specific value,
 > visible as a large drop only when the display runs faster than it.
 
 **Mechanism now localised in source, with a source-predicted one-flag fix that lands by eye (§5).** The
@@ -57,7 +68,7 @@ re-anchors the commit to a fixed pre-vsync phase — makes **every mode smooth b
 > ~120 Hz, not a regularised 60 Hz. **Camera-confirmed for card B in A+B.** (Busywork/color under the flag
 > were left under-sampled by a short second cycle — inconclusive, not refuted; card A/layout does *not* reach
 > that smoothness. Scope stays on A+B.) **Update:** a later full-travel clip (`IMG_3852`) extends the
-confirmation to **card A** too — flag-only card A = card B = 91 %, so the flag fixes both; the apparent
+confirmation to **card A** too — flag-only card A = card B = 91 %, so on that clip the flag lifts card A to card B's level; the apparent
 card-A residual above was a crop-clipping artefact, now withdrawn.
 
 **One thing the flag result *does* bank now (free):** it operates entirely in the present/commit path
@@ -147,7 +158,7 @@ larger (~9 px vs ~4.5 px), improving signal-to-noise.
 **Reading — a pin, not a ratio.** The *effective* present rate is ~similar at both display rates
 (~50–58 Hz). So the effect is not "B drops to a fraction of the display rate"; it is:
 
-> Card B's present is **pinned near ~55 Hz**. At 120 Hz that is ≈half (52 % held — looks broken);
+> Card B's present reads as **pinned near ~55 Hz**. At 120 Hz that is ≈half (52 % held — looks broken);
 > at 60 Hz that is ≈full (8 % held — looks smooth).
 
 A single "~55 Hz cap" predicts **54 % / 8 %** held at 120 / 60 Hz; measured **52 % / 8–16 %** — a near
@@ -191,7 +202,7 @@ case. (The alternative backends each bring their own perf issues — software sl
 single-card judder — so they are *layer-confirmation*, not usable workarounds.)
 
 Consistent with §1 (clean through `SwapBuffers`) and §2 (per-frame main-thread trigger): the ~55 Hz pin
-lives in the **Metal CALayer commit / CoreAnimation present**, where the compositor frame is handed to
+points to the **Metal CALayer commit / CoreAnimation present**, where the compositor frame is handed to
 the OS. *(Flag results are by-eye, now partly camera-corroborated: the software clip `IMG_3845` reads
 card B **~23 % held** in software A+B — its one cleanly-sampled 240 fps swing — vs **~52 %** on Metal.
 Coupling clearly reduced, though not down to fully smooth (~2 %), consistent with software's own raster
@@ -286,7 +297,7 @@ in readable code is why this is Metal-only.** Both readable Metal-vs-GL candidat
 So the source dive **localises the trigger and the entire commit-timing machinery**, but *from code alone*
 does **not** conclusively identify the Metal-specific pin. **→ The §5d fix experiment points at it and the
 §5f camera pair confirms it (for card B / A+B):** forcing vsync-aligned commit takes card B from an
-in-clip-validated bug-level 60 % to smooth-control 87 % hold=2, so the pin **is** the commit phase (the
+in-clip-validated bug-level 60 % to smooth-control 87 % hold=2, so the pin is **most consistent with** the commit phase (the
 free-floating commit crossing the latch deadline). What remains unread is only the narrower question of *why the default Metal path
 enters that bad phase while default GL does not* — most likely a per-frame commit-timing-profile difference
 (GL's present may carry implicit vsync pacing that ANGLE-Metal's async commit lacks), closable by the §5e
@@ -327,7 +338,7 @@ late phase → deferred to the `OnVSyncPresentation()` CVDisplayLink callback, f
 backend, backpressure, CALayer tree and IOSurfaces are untouched — a near-single-variable experiment. But the
 readout so far is by-eye, so:
 
-- **Cause: the commit's phase relative to the display refresh** — the free-floating commit crossing the
+- **Best-supported cause: the commit's phase relative to the display refresh** — the free-floating commit crossing the
   ~1.5 ms latch deadline (§5a); re-anchoring the phase removes the jerk. By-eye here, then **camera-confirmed
   for card B / A+B in §5f** (default 60 % → flag 87 % hold=2, self-validated in-clip).
 - **If real, commit-phase alone is sufficient to cure it:** the flag touches only *when* the commit issues,
@@ -469,7 +480,7 @@ gap from 100" at flag is footage, not residual bug (this clip's genuinely-smooth
 86 %). **(2) card A (layout)** looked left behind (flag 57 % vs DevTools 94 %) — but that 57 % was **crop
 clipping** (see next), not a real residual.
 
-**Card A resolved — the flag fixes the layout animation too (`IMG_3852.mov`).** The `IMG_3848` card-A crop
+**Card A resolved — the flag lifts the layout animation to the same level (`IMG_3852.mov`).** The `IMG_3848` card-A crop
 clipped the travel (248 px vs the true ~475), which inflated card A's held fraction — a textbook
 "rectangle doesn't cover full travel → motion read as stillness" error. A closer clip with a **full-travel
 card-A crop** (travel 471 px, verified) measures, at A+B:
@@ -484,7 +495,7 @@ brings the **layout** animation to the *same* smooth level as the compositor one
 behind. (Default card A is ~55 %, README both-A 54 % / A-alone 59 %, so the flag lifts it ~55 %→91 %, same as
 card B.) And **flag-only ≈ flag+DevTools**, so **DevTools adds nothing beyond the flag** — the flag alone
 fully fixes the present. Mechanistically consistent: both animations present through the same CALayer commit,
-so re-aligning that commit fixes both. The earlier "flag fixes only the compositor animation" reading is
+so a single re-anchored commit acting on both is the expected result. The earlier "flag fixes only the compositor animation" reading is
 **withdrawn** — it was the clipped crop.
 
 ---
@@ -1081,7 +1092,8 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
 - Trigger = per-frame main-thread work (contention *or* commit); **not** compositor-layer concurrency
   *(visually observed)*.
 - **Rate-dependent**: nearly smooth at 60 Hz (~8–16 % held) vs ~52 % held at 120 Hz; card B's present
-  pinned near ~55 Hz *(camera-measured, self-validating clip)*.
+  behaving as if pinned near ~55 Hz *(the held-fractions are camera-measured on a self-validating clip; the
+  ~55 Hz pin is the inference that reconciles them, not itself a measurement)*.
 - **macOS-specific**: Firefox does not reproduce (README); **Windows @ 144 Hz is smooth** *(visual)* —
   so it is the macOS present path, not high rate per se.
 - **Metal present path specifically** *(visual, flag sweep §4)*: reproduces only on the default
@@ -1101,7 +1113,8 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   *(§5d source; §5f camera)*: the flag changes only *when* the identical commit issues. The fixed-camera
   default-vs-flag pair (`IMG_3848`) shows card B in A+B going from an in-clip-validated **bug-level 60 %** to
   **smooth-control 87 %** hold=2 (hold=2-dominant → true ~120 Hz). So the free-floating commit crossing the
-  ~1.5 ms latch deadline is the pin, and commit-phase alone cures it — a **user workaround** and the
+  ~1.5 ms latch deadline is the **best-supported account** of the pin, and correcting the commit phase alone
+  is **demonstrably sufficient** to cure it — a **user workaround** and the
   **upstream fix target**.
 - **Why the fix is off by default — ANSWERED from primary sources** *(source-readable, §7)*. The general
   vsync-aligned present was implemented in 2023 ("in order for CoreAnimation to latch frames in a

@@ -76,12 +76,16 @@ measurements — localised the cause and confirmed a fix. Details and per-claim 
   (the timestamp definition was revised in 2024, before the 2025 experiment, so this is **not** a claim that
   the experiment was wrong): **§7h**.
 
-* **Mechanism (localised; source-readable + inferred).** The default macOS present commits the CALayer tree
-  synchronously and *not* vsync-aligned; a documented ~1.5 ms latch deadline slips any late commit to the
-  next refresh. Concurrent per-frame main-thread work pushes the commit late (via the Viz begin-frame
-  deadline), so it crosses the deadline and is presented one refresh later — the irregular cadence measured
-  below. The loss is at the **macOS CALayer commit → CoreAnimation present** handoff, not in Chrome's
-  compositor scheduling (a Perfetto trace runs clean at ~120 Hz through `SwapBuffers`).
+* **Mechanism (localised; source-readable + inferred).** Two parts, and they carry different weight. **The
+  localisation is measured:** the loss is at the **macOS CALayer commit → CoreAnimation present** handoff,
+  not in Chrome's compositor scheduling — a Perfetto trace runs clean at ~120 Hz through `SwapBuffers`, and
+  the flag that fixes it acts *entirely* below `SwapBuffers`. **The internal mechanism is inferred, and
+  stated as the best-supported account rather than a proven one:** the default macOS present commits the
+  CALayer tree synchronously and *not* vsync-aligned; a documented ~1.5 ms latch deadline slips a late commit
+  to the next refresh; concurrent per-frame main-thread work pushes the commit late via the Viz begin-frame
+  deadline. Re-anchoring the commit phase is **demonstrably sufficient** to cure it (that is what the flag
+  does, and it does); no claim is made that nothing else contributes upstream. Per-claim evidence standards
+  in [`diagnostic-findings.md`](diagnostic-findings.md).
 
 * **Metal-specific.** The coupling reproduces only on the default **ANGLE-Metal** present. On **ANGLE-OpenGL**
   (`--use-angle=gl`) and **software compositing** it is absent (camera-measured follow-up: OpenGL keeps the
