@@ -92,7 +92,7 @@ Same area as Chromium's open macOS present work —
 [issue 330771325](https://issues.chromium.org/issues/330771325), *"VSync aligned frame presentation on
 Mac"*, which is where `kVSyncAlignedPresentation` was added. *(The ProMotion umbrella
 [40202100](https://issues.chromium.org/issues/40202100) is **closed as Fixed** since 2023-12-19, with its
-reporter noting that specific failures should "be filed as new bugs"; its parent
+reporter noting that specific failures should "be filed as new bugs"; the related
 [40062488](https://issues.chromium.org/issues/40062488) closed 2025-03-07.)*
 
 ---

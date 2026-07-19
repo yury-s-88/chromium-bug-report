@@ -786,10 +786,21 @@ not:
 | 345275139 | Support CADisplayLink on macOS | open, Assigned, P2 |
 | **330771325** | **VSync aligned frame presentation on Mac** | **open, Assigned, P2** — the flag's home |
 
+*(The breadcrumb on each child page shows 40062488's title above 330771325 and 345275139, so 40062488
+**appears** to be their parent. That is read off the page layout, not a stated relationship — and nothing
+here depends on it.)*
+
 The umbrella was closed by its reporter (#66, 2023-12-19) with: *"This bug was about ensuring we supported
 ProMotion. If there are instances where Chrome does not correctly support it, **it's best to file them as
 new bugs**."* — the maintainer explicitly inviting a report shaped like this one. **The live bug to
 reference is 330771325**, not the umbrella.
+
+**Named but not checked: issue 40820525** *("ProMotion support is broken")*. It was on this
+investigation's own list and has **not** been read — it was not among the snapshots available, and
+`issues.chromium.org` returns only a sign-in page to an unauthenticated fetch. Nothing in §7 rests on it
+(the entire "why" rests on public Gerrit CLs), but it is the one named source left unopened, and from its
+title it may duplicate or corroborate this report's own upstream bug **534417001**. **Recorded as an open
+gap, not silently dropped.**
 
 **§5a was stated by a Chromium graphics lead in 2021.** ccameron, 40202100 #12 (2021-10-20):
 
@@ -859,6 +870,14 @@ This report's own `Jank3` **11.5 → 0.1** (§6) is **the same kind of number** 
 and is already quoted with that caveat. What is asymmetric is not the metrics — it is the **ground truth**:
 an external camera exists for the smoothness side and settles it; nothing equivalent has been produced for
 the latency side.
+
+**What is *not* being claimed — and why §7f still stands.** The added latency is **real by construction**:
+deferring an already-ready commit to the next DisplayLink callback costs up to one refresh, and no
+measurement dispute changes that. So §7f's reading — that gating on interaction is *coherent* engineering,
+because it buys smoothness precisely where INP cannot charge for it — is unaffected. What is
+model-mediated is only the **measured magnitude** of that cost in INP / guardrail units, and therefore
+whether it outweighs a smoothness gain that *is* now camera-confirmed. This section argues for measuring
+the cost better, **not** for arguing it away.
 
 **Sharpened ask** (refining §7f):
 
@@ -999,7 +1018,7 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
     commit `c920f54`, disabled-by-default, macOS 14+, 2024 — its own bug is **345275139**, open). **Corrected
     in §7h:** the right bug to cite is **330771325** *(VSync aligned frame presentation on Mac — open,
     Assigned, P2; the flag's home)*, **not** the ProMotion umbrella 40202100, which was **closed as Fixed on
-    2023-12-19**, nor its parent 40062488, closed 2025-03-07. So the bug is best framed as *"the default (non-vsync-aligned, CVDisplayLink) present
+    2023-12-19**, nor 40062488, closed 2025-03-07. So the bug is best framed as *"the default (non-vsync-aligned, CVDisplayLink) present
     path drops compositor-animation cadence on ProMotion under concurrent per-frame main-thread work; the
     in-development vsync-aligned path already fixes it — here is a minimal camera-measured repro, the exact
     trigger, and the exact toggle."* Note that the scrolling-only variant `kVSyncAlignedPresentationForScrolling`
