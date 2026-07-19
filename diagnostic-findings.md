@@ -533,6 +533,196 @@ the bug — so the loss is real and on-machine-measurable, just not through a *c
 
 ---
 
+## 7. Why the fix is off by default — the upstream history *(primary-source: public Gerrit CLs)*
+
+§5–§6 establish *that* `--enable-features=VSyncAlignedPresentation` fixes the bug. The remaining
+conceptual gap was *why Chromium ships it disabled*. It is answerable from public primary sources, and
+the answer changes what this report should ask for upstream.
+
+**Provenance.** Every quote below is **verbatim from a merged CL description** on
+`chromium-review.googlesource.com` (public Gerrit REST API, no sign-in; `crrev.com/c/<n>` for each).
+All CLs are in `chromium/src`, branch `main`, owner **Maggie Chen** (`magchen@chromium.org`); workstream
+bugs **330771325** and **1404797**. The end state was verified byte-for-byte against the reproduced build
+(tag `150.0.7871.125`) — `kVSyncAlignedPresentationForScrolling` = `FEATURE_ENABLED_BY_DEFAULT`,
+`kVSyncAlignedPresentation` = `FEATURE_DISABLED_BY_DEFAULT`. *(Standard of evidence: the timeline and
+quotes are **source-readable**; the causal link from the 2025 experiment to the 2026 default is marked
+**inferred** below, because no CL states it.)*
+
+### 7a. Short answer — the question splits in two
+
+**(i) Why is broad vsync-aligned present not the default behaviour?** *(Answered, firmly.)* Because it
+**was** the default behaviour in the experiment and lost. It was implemented, put behind Finch,
+A/B-tested on Beta with three targeting arms, and **rejected in favour of the narrow scroll-only slice** —
+it regressed **guardrail metrics** (Interaction-to-Next-Paint is named explicitly) even though it improved
+smoothness a lot. **→ Hypothesis 1 (latency), confirmed.**
+
+**(ii) Why is *this* flag — `kVSyncAlignedPresentation`, created 2026-03-23 — off?** *(Answered less
+firmly.)* Because it is a **fresh re-introduction of that general capability that has not been through an
+experiment of its own.** New Chromium features land disabled; no CL states a reason for this one, and the
+entire code review is a single comment — *"lgtm, thanks."* **→ Hypothesis 2 (still under development)** —
+and for *this* sub-question it is **co-primary with (i), not a footnote**: the workstream is visibly live
+around it (present-path latency trimmed three days later in CL 7701873; CL 5911632 still open 2026-07-16).
+
+**Two readings of (ii), both consistent with the public record.** *"Parked off after the 2025 verdict"*
+and *"staged for a second attempt now that the present path is cheaper"* both fit. The timeline leans
+towards the second — but CL 7701873's latency trim is gated on **other** flags
+(`kAllowCallbackWithoutPostTask`, `kEnableDrDc`, `CADisplayLinkInBrowser`), so the "trim → re-attempt"
+link is **circumstantial, not proven**. The workstream bug **330771325** (sign-in required) would settle it.
+
+**What is firm either way, and is what this report needs:** the gap the bug lives in is a **known, measured
+trade-off, not an oversight** — so the upstream ask must be a *scoped re-evaluation*, not "flip the flag"
+(§7f).
+
+### 7b. Timeline
+
+| date | CL | what happened |
+|---|---|---|
+| 2023-08-25 | [4710566](https://crrev.com/c/4710566) | **Implemented.** "Delay frame presentation until next VCDisplayLink callback on Mac" — reviewed by ccameron. Bug 1404797 |
+| 2023-11-17 | [5037740](https://crrev.com/c/5037740) | Put behind a flag (`DelayOnFramePresent`) |
+| 2024-03-27 | [5399694](https://crrev.com/c/5399694), [5399901](https://crrev.com/c/5399901) | Finch prep: "In preparation for the finch kVSyncAlignedPresent"; added to `fieldtrial_testing_config` |
+| 2025-01-17 | [6143459](https://crrev.com/c/6143459) | **First named cost: INP.** Mitigation added so non-animating/non-interacting frames commit immediately |
+| 2025-01-17 | [6182347](https://crrev.com/c/6182347) | Dropped the `kNumPendingFrames` variant — "does not show any benefit on stable 1%" |
+| 2025-03-10 | [6334447](https://crrev.com/c/6334447) | UMA to measure what fraction of frames must wait |
+| 2025-04-24 | [6482387](https://crrev.com/c/6482387) | **Three Finch arms created**: `AllFrames`, **`Animation`**, `Interaction` (param `Target`) |
+| 2025-05-20 | [6558510](https://crrev.com/c/6558510) | **Experiment verdict**: `Interaction` best on Beta → made the launch target |
+| 2025-06-25 | [6674714](https://crrev.com/c/6674714) | **Shipped interaction-only**, enabled by default; the `AllFrames`/`Animation` targeting code **deleted** |
+| 2026-03-23 | [7690172](https://crrev.com/c/7690172) | **Our flag added**: new `kVSyncAlignedPresentation`, **disabled by default**; old one renamed `…ForScrolling` |
+| 2026-03-26 | [7701873](https://crrev.com/c/7701873) | Present-path latency trimmed: callbacks run directly instead of via posted tasks |
+| open, 2026-07-16 | [5911632](https://crrev.com/c/5911632) | Workstream still active |
+
+### 7c. The four quotes that carry it *(verbatim)*
+
+1. **The original motivation is this report's own mechanism** — CL 4710566:
+   > "When CVDisplayLinkBeginFrameSource is enabled, **in order for CoreAnimation to latch frames in a
+   > consistent timing**, only present a frame in CVDisplayLink callback."
+
+   That is §5a's latch deadline, named by the author in 2023. The code was written to cure exactly the
+   inconsistency we measure.
+
+2. **The cost is latency** — CL 6143459:
+   > "With kVSyncAlignedPresent enabled, **all frames are delayed** and committed to CoreAnimation in the
+   > next VSync to improve smoothness. This CL allows frames that don't handle interactions or animations
+   > to commit immediately without waiting. **The goal is to prevent INP (Interaction to Next Paint)
+   > regression** when a frame doesn't have a smoothness issue."
+
+3. **The trade-off, stated flatly** — CL 6482387:
+   > "**This group still has big regressions on guardrail metrics, although it improves a lot on
+   > smoothness metrics.**"
+
+   *(Interpretation, not source: the antecedent of "This group" is ambiguous in context. The most natural
+   reading is the experiment group carrying the CL-6143459 INP mitigation — i.e. **even with** the
+   mitigation, broad alignment regressed guardrails, which is why explicit target arms were introduced.
+   Read it as ambiguous; the sentence's plain content — smoothness up, guardrails down — is not.)*
+
+4. **The verdict** — CL 6558510:
+   > "There are three arms in VSyncAlignedPresent finch experiment: "AllFrames", "Animation", and
+   > "Interaction". Among these three arms, **"Interaction" shows the best result in Beta channel.** Now
+   > make the fieldtrial default from "AllFrames" to "Interaction" which will be the finch launch target
+   > on stable channel."
+
+   And the launch, CL 6674714: *"Enable VSyncAlignedPresent by Default on Mac. **This feature improves
+   scrolling smoothness significantly.**"*
+
+### 7d. The hypotheses, scored
+
+| hypothesis | verdict |
+|---|---|
+| **1. Latency** | **Confirmed, and specific — this is why the *behaviour* is not the default (§7a-i).** Not a guess about latency in the abstract: **INP** is named in CL 6143459, "guardrail metrics" in CL 6482387, and a real three-arm Beta experiment picked the arm with the least latency exposure. |
+| **2. Unfinished / still under development** | **Co-primary — this is why *this flag* is off (§7a-ii).** `kVSyncAlignedPresentation` is a fresh (2026-03) re-introduction that has had no experiment of its own, is absent from `fieldtrial_testing_config.json` in `main`, and sits in a visibly live workstream. Not "unfinished code", though: the behaviour itself shipped, for scrolling. |
+| **3. Perf / power regressions** | **No specific evidence found.** Possibly subsumed by the unspecified "guardrail metrics"; nothing in any CL names power or GPU cost. |
+
+### 7e. What the sources do **not** say — the limits of this finding
+
+- **The `Animation` arm's standalone result is unknown.** CL 6558510 says only that `Interaction` was
+  *best of three*. It does **not** say `Animation` was acceptable-but-second, and it does not say it was
+  harmful. Treat its individual numbers as **unread**. *(They are presumably in bug 330771325, which
+  requires sign-in.)*
+- **CL 7690172 gives no reason for the disabled default.** Its entire review is one comment — *"lgtm,
+  thanks."* So "off by default **because** `AllFrames` lost in 2025" is **inferred** from the chain
+  (new flags start off; the same behaviour had already lost), not stated by anyone.
+- **The experiment's arms were compared on aggregate Beta metrics**, whose composition is not public.
+
+### 7f. Consequence — the upstream ask must change
+
+**Do not ask upstream to flip `kVSyncAlignedPresentation` on.** That is the `AllFrames` behaviour, which
+has already been measured and rejected once. Asking for it re-opens a settled question and invites the
+answer "we tried; it regressed guardrails."
+
+**And the obvious-looking alternative has a trap worth naming.** "Just restore the `Animation` target —
+animation frames aren't interactions, so there's no INP cost" is **wrong**, and an upstream reviewer will
+see why immediately. `is_handling_animation` is set in `cc/trees/layer_tree_host_impl.cc`
+(`CompositorFrameMetadata` population) as
+
+```
+metadata.is_handling_animation = HasMainThreadAnimation(active_types) ||
+                                 HasCompositorThreadAnimation(active_types);
+```
+
+and `HasMainThreadAnimation` (`cc/metrics/frame_sequence_metrics.h`) includes **`kRAF`** alongside
+`kMainThreadAnimation`, `kCanvasAnimation` and `kJSAnimation`. **Any page running a `requestAnimationFrame`
+loop therefore has `is_handling_animation == true` more or less permanently** — including while it paints
+the response to a click or keypress. An `Animation` target degenerates toward `AllFrames` on exactly the
+pages INP is measured on, so it inherits the regression that killed `AllFrames`. *(This is also why our own
+repro is squarely inside `is_handling_animation`: card A is `kMainThreadAnimation`, card B is
+`kCompositorAnimation` — literally the tracker named in the §6 telemetry,
+`Graphics.Smoothness.Jank3.CompositorThread.CompositorAnimation` — and the page's own rAF control adds
+`kRAF`.)*
+
+**What *is* defensible to ask** — three points, each grounded in something this report measured or read:
+
+1. **The shipped gate is narrower than "interaction" sounds, and it is INP-shaped.**
+   `LayerTreeHostImpl::IsHandlingInteraction()` returns true only for
+   `GetActivelyScrollingType() != kNone || input_delegate_->IsHandlingTouchSequence()` — **active scroll
+   or an in-progress touch sequence**, nothing else. And INP by definition measures only **click, tap and
+   keypress**; [scrolling is explicitly excluded](https://web.dev/articles/inp). So the shipped design
+   aligns precisely the frames INP cannot charge it for. That is coherent engineering — and it explains
+   the shape of the gap rather than treating it as an oversight.
+
+2. **The benefit is display-rate-dependent, so a Mac-wide aggregate dilutes it.** §3 measured the same
+   animation at ~52 % held on a 120 Hz ProMotion panel versus 8–16 % at a fixed 60 Hz — i.e. the loss this
+   flag cures is **severe at 120 Hz and near-invisible at 60 Hz**, while the latency cost of alignment
+   applies at every rate. A Beta population dominated by 60 Hz Macs would therefore show the smoothness
+   win diluted and the guardrail cost undiluted. **The ask: re-evaluate the general path segmented by
+   display refresh rate (or gate it on high-refresh / variable-refresh panels), rather than as one Mac-wide
+   arm.** *(Inference from our §3 measurement plus the public arm structure — the Beta population's panel
+   mix is not public.)*
+
+3. **The latency budget has changed since the arms were compared.** CL 7701873 (2026-03) removed posted-task
+   hops from the commit/callback path "to avoid unnecessary delays" — after the 2025 experiment. So the
+   measured cost of alignment today is not necessarily the cost that lost in 2025. *(Inferred.)*
+
+### 7g. A free falsifiable prediction this history hands us *(predicted — no build, no camera, no flag)*
+
+`kVSyncAlignedPresentationForScrolling` is **on by default** and gates on `data.is_handling_interaction`,
+which is true while the page is **actively being scrolled**. The commit path taken during a scroll is
+therefore *the same vsync-aligned path* the flag forces all the time.
+
+> **Prediction:** on **stock Chrome, no flags**, with the A+B repro running on a page tall enough to
+> scroll — card B should become **smooth while a scroll gesture is actively in progress** and revert to
+> jerky the moment the scroll ends.
+
+**How to run it cleanly.** The cards must **stay still while something scrolls**, or they translate with the
+viewport and neither the eye nor `track_cadence.py` can read their cadence. **Prefer a scrollable inner
+container** (a `overflow-y: scroll` box of filler text, scrolled with the pointer over it) with the cards
+left **outside** it, untouched. *Avoid* the obvious `position: fixed` wrapper: promoting the cards to their
+own compositing layer changes the present setup itself, so a null result there could be the harness rather
+than the mechanism. Then: start A+B, confirm card B is jerky, begin a slow continuous two-finger scroll
+inside the box, and watch card B *during* the gesture.
+
+**Why a positive result would be strong.** The obvious confound runs the *wrong way*: scrolling **adds**
+main-thread and compositor work, which by §2's trigger should make card B **worse**, not better. So
+"smooth while scrolling" cannot be explained by reduced load — it points at the one thing scrolling changes
+in the present path, `data.is_handling_interaction`. *(Remaining caveat: a scroll also changes what the
+compositor is doing more broadly; this is a strong hint, not a single-variable experiment like §5f.)*
+
+If it holds, it is a **fourth independent confirmation of the mechanism that requires nothing but stock
+Chrome** — and the strongest possible framing for the upstream report: *Chrome's own shipped code already
+fixes this animation, but only while you happen to be scrolling.* If it does **not** hold, the
+commit-phase story needs re-examination (or `is_handling_interaction` is not set as read). Either way it
+is a ~1-minute test. **Not yet run.**
+
+---
+
 ## What is resolved / still open
 
 **Resolved**
@@ -563,6 +753,16 @@ the bug — so the loss is real and on-machine-measurable, just not through a *c
   **smooth-control 87 %** hold=2 (hold=2-dominant → true ~120 Hz). So the free-floating commit crossing the
   ~1.5 ms latch deadline is the pin, and commit-phase alone cures it — a **user workaround** and the
   **upstream fix target**.
+- **Why the fix is off by default — ANSWERED from primary sources** *(source-readable, §7)*. The general
+  vsync-aligned present was implemented in 2023 ("in order for CoreAnimation to latch frames in a
+  consistent timing"), Finch-tested on Beta in 2025 with three targeting arms (`AllFrames` / `Animation` /
+  `Interaction`), and **rejected in favour of the scroll-only arm** because broad alignment "**still has big
+  regressions on guardrail metrics, although it improves a lot on smoothness metrics**" (CL 6482387); INP
+  is the named cost (CL 6143459). `kVSyncAlignedPresentation` (2026-03, CL 7690172) is a **re-introduction**
+  of that general behaviour which has had **no experiment of its own yet** — so the flag's own off-state is
+  "new feature, not yet run" as much as "parked after the 2025 verdict" (§7a-ii; not disambiguated by any
+  public CL). Either way the gap is a **deliberate, measured trade-off**, not an oversight — which is why the
+  upstream ask must be a *scoped re-evaluation*, not "flip the flag" (§7f).
 
 **Open**
 - **Fix vs suppressor #4 — RESOLVED for A+B (card B *and* card A)** *(§5f)*. The camera pair confirms the fix
@@ -635,11 +835,24 @@ the bug — so the loss is real and on-machine-measurable, just not through a *c
     in-development vsync-aligned path already fixes it — here is a minimal camera-measured repro, the exact
     trigger, and the exact toggle."* Note that the scrolling-only variant `kVSyncAlignedPresentationForScrolling`
     is **on by default** — the team already ships vsync-aligned present for the scroll case, just not generally.
-    *(Verified public: CADisplayLink feature status + umbrella issue. Inferred: `kVSyncAlignedPresentation` is
-    part of the same effort — its own CL/issue wasn't readable, the tracker requires sign-in.)* Separately,
+    *(Verified public: CADisplayLink feature status + umbrella issue.* **Now also verified — see §7:** *the flag's
+    own CL is [7690172](https://crrev.com/c/7690172) (2026-03-23, bug 330771325), and the whole Finch history of
+    the feature is public. The earlier "not readable, tracker requires sign-in" caveat applied to the **issue
+    tracker**; the **Gerrit CLs are public** and carry the rationale.)* Separately,
     input issue **40375001** ("vsync-aligned input") was checked and is **unrelated** — Internals→Input→Touch
     pipeline (MotionEventBuffer, input resampling), *before* the renderer; zero presentation-path terms. Only
     the name "vsync-aligned" overlaps.
+  - **Ask precisely (§7f).** Do **not** request "enable `kVSyncAlignedPresentation`" — that is the `AllFrames`
+    behaviour already measured and rejected. Do **not** propose "gate on `is_handling_animation`" without
+    naming the `kRAF` trap (that predicate is ~always true on rAF pages, so it degenerates to `AllFrames`).
+    Ask instead for a **display-refresh-rate-segmented re-evaluation** of the general path — the loss is
+    severe at 120 Hz and near-absent at 60 Hz (§3), so a Mac-wide arm dilutes the benefit while the latency
+    cost applies uniformly.
+- **Run the §7g free prediction first** *(1 minute, stock Chrome, no flags, no camera)*: on a scrollable page,
+  card B should go **smooth while a scroll gesture is in progress** (the shipped `…ForScrolling` flag routes
+  those frames through the same vsync-aligned commit) and revert to jerky when the scroll stops. If it holds
+  it is a **fourth independent confirmation using only stock Chrome**, and the sharpest possible framing for
+  the upstream report.
 - **Optional: complete cycle 2** (busywork + color under the flag, a few clean fires each) to extend the
   confirmation beyond A+B to the other bug conditions. Not required for the core claim.
 - **Passive histogram** `Gpu.Mac.BackpressureUs` on the buggy default run — excludes the backpressure poll.

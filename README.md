@@ -32,6 +32,15 @@ measurements — localised the cause and confirmed a fix. Details and per-claim 
   sibling `kVSyncAlignedPresentationForScrolling` is **on by default**, so Chrome already vsync-aligns the
   present for scrolling — just not for general animation. The bug lives in exactly that gap.
 
+* **That gap is deliberate, and its history is public.** The general vsync-aligned present was written in
+  2023 *"in order for CoreAnimation to latch frames in a consistent timing"*, then Finch-tested on Beta in
+  2025 with three targeting arms (`AllFrames` / `Animation` / `Interaction`) and **narrowed to the
+  scroll-only arm**, because broad alignment *"still has big regressions on guardrail metrics, although it
+  improves a lot on smoothness metrics"* — Interaction-to-Next-Paint being the named cost. The flag we use
+  here is a **2026 re-introduction** of the rejected general behaviour, parked off by default. Full CL-by-CL
+  timeline, verbatim quotes and the resulting (narrower) upstream ask: **§7 of
+  [`diagnostic-findings.md`](diagnostic-findings.md)**.
+
 * **Mechanism (localised; source-readable + inferred).** The default macOS present commits the CALayer tree
   synchronously and *not* vsync-aligned; a documented ~1.5 ms latch deadline slips any late commit to the
   next refresh. Concurrent per-frame main-thread work pushes the commit late (via the Viz begin-frame
