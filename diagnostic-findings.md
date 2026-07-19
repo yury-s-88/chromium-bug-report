@@ -909,7 +909,7 @@ reports a 60 Hz display.** Manually **resizing the window** makes scrolling smoo
 |---|---|---|
 | what is at 60 Hz | **the display, as Chrome sees it** — `testufo.com` reports a 60 Hz panel | **nothing is**: rAF holds a measured ~120 Hz (README), and vsync source → BeginFrame → `SwapBuffers` are clean ~120 Hz in the trace (§1) |
 | nature of the failure | **rate selection** — Chrome chose the wrong refresh interval | **commit phase** — correct rate, wrong moment relative to the ~1.5 ms latch deadline (§5a) |
-| workaround | **resize the window** (temporarily) | untested for this bug — see next steps |
+| workaround | **resize the window** (temporarily) | **resize does *not* suppress it** — measured, below |
 | status | stale since 2022, P3, wrong component | — |
 
 **Its era is also gone.** The Chrome 98 regression was tracked as crbug **1274172** with a fix landing in
@@ -917,6 +917,37 @@ Canary (CL 3488608, see 40202100 #49/#51), and #16 confirms *"the canary version
 The `DelayBasedBeginFrameSource` machinery it lived in was then replaced by `CVDisplayLinkBeginFrameSource`
 (2023-11), whose flag was deleted as permanently-on in 2025 (CL 6192599). **That machinery does not exist in
 the reproduced build.**
+
+**Resize discriminator — RUN, and it is a clean negative** *(2026-07-19; raw dump
+[`telemetry/jank3-resizetest.txt`](telemetry/jank3-resizetest.txt))*. 40820525's workaround is to resize the
+window. It does **not** work on this bug:
+
+| `Jank3.CompositorThread.CompositorAnimation` | n | mean | at zero |
+|---|---:|---:|---:|
+| **after resizing the window** | **81** | **12.96** | **0 %** |
+| *bug baseline — default (§6)* | 75 | *11.45* | *1.3 %* |
+| *bug baseline — unscrolled, derived (§7g)* | 16 | *12.44* | *0 %* |
+| *fixed — scrolling (§7g)* | 18 | *0.11* | *94.4 %* |
+| *fixed — with the flag (§6)* | 32 | *0.09* | *90.6 %* |
+
+The resize run sits **in the bug population, not the fixed one**, with no trace of the >90 %-at-zero
+population that both the flag and scrolling produce. **So resizing is not suppressor #5, and 40820525's
+workaround does not touch this bug** — a fourth independent separation from it.
+
+**The prediction was the right way round.** A resize forces a new `Resize()` → new IOSurfaces and CALayer
+tree, but the source dive on the suppression question found the resize → `CATransactionV2 createFencePort`
+path is **one-time and feature-gated**, so there was no readable mechanism by which a resize could re-phase a
+free-floating commit. The measurement agrees with the code.
+
+**Free bonus — the bug baseline is now replicated three times:** 11.45 (§6, n = 75), 12.44 (§7g derived,
+n = 16) and 12.96 (here, n = 81 — the largest of the three), all with ≤ 1.3 % of sequences at zero. That
+tightens §7g: scrolling's **0.11 / 94.4 %** is off a *thrice-replicated* distribution, not off a single
+reference run.
+
+**One thing not yet recorded: the resize protocol** — how many resizes, and where they fell inside the
+monitored window, is not in the dump. 40820525's own reporters describe their effect as persisting *"until I
+quit and relaunch"* (#1) and for at least minutes (#54), so a single resize would have sufficed to show it
+and a purely transient effect is not a plausible escape. Worth pinning down before this is quoted upstream.
 
 *(One shared observation, quoted only to be discounted: commenters #12/#14 report that disabling hardware
 acceleration fixes theirs, superficially echoing §4. It is weak evidence of anything — disabling HW
@@ -1180,19 +1211,9 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   2. **State the non-duplication up front in the upstream comment.** *"Not 40820525: rAF and the vsync
      source are measured at ~120 Hz here; the loss is present-**phase**, below `SwapBuffers`."* Without it,
      a triager pattern-matching on "ProMotion broken on macOS" may dedupe this into that stale P3.
-- **Cheap discriminator, ~1 minute, not yet run: does *resizing the window* suppress this bug?** It is
-  40820525's workaround, so a **negative** result is a clean extra separation from it; a **positive** one
-  would be a new suppressor (#5) and would need explaining. Either outcome is worth having before filing the
-  comparison. *(The source dive on the DevTools-suppression question already found the resize →
-  `CATransactionV2 createFencePort` path is one-time and feature-gated, so a positive result would* not
-  *have an obvious readable mechanism.)*
-  **Run it between two widths that are both ≥ 1000 px** (e.g. 1600 → 1200): below that, `diagnostic.html`'s
-  A+B width guard trips. Any size change at all is enough for the effect under test. *(The guard was fixed
-  for this: it previously re-checked the "B transform only" radio on every drop below the threshold —
-  **including mid-run**, since a `disabled` radio still accepts a programmatic `.checked`. A Loop started in
-  A+B would have continued as B-alone while `runWindow()`'s `performance.mark` tag followed the switch: a
-  wrong-mode run labelled as the right one. It now holds the selection, blocks Fire/Loop, and aborts an
-  invalidated run with an on-screen notice.)*
+- **Resize discriminator: DONE, clean negative** (§7h) — resizing does not suppress this bug (12.96, 0 % at
+  zero, squarely the bug population). Only loose end: **record the exact resize protocol** (how many, and
+  where in the monitored window) before quoting it upstream.
 - **§7g is done** — hardened on the passive `Jank3` counter (scrolling 0.11 / 94.4 % at zero vs
   not-scrolling 12.44 / 0 %, disjoint distributions, both landing on published references). Two optional
   tighteners remain, neither load-bearing: a **reversed-order repeat** (unscrolled first) to exclude drift,
