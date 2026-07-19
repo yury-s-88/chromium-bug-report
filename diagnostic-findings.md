@@ -757,6 +757,27 @@ predicts it** and the recorder case did not. **→ Hardening step, ~2 minutes, n
 the flag's ~0.1, the result is confirmed on a **passive, non-suppressing counter**, on the same axis and
 against the same published reference numbers as the flag. Until then §7g stays *visually observed*.
 
+**Hardening attempt #1 — REJECTED as pooled** *(logged, not dropped — per this report's own rule that every
+rejected run is reported)*. A first `chrome://histograms` read (2026-07-19) ran **unscrolled first, then
+scrolled, in one monitoring window**, so the dump is a **mixture of two conditions** and cannot be read as a
+scroll measurement — pooling conditions is the specific error this report was rebuilt to eliminate. For the
+record: `Jank3.CompositorThread.CompositorAnimation` n = 171, mean **6.4**, with **24.0 % of sequences at
+zero** — against the published default reference (n = 75, mean 11.5, **1.3 %** at zero). So the pooled run
+contains **41 zero-jank sequences where a pure-default run predicts ~2**. That excess is a **hint in the
+predicted direction, explicitly not a result**: the split between the two phases is unknown, and one
+self-consistent decomposition (~25 % of sequences flag-like at ~0.1, the remainder at ~8.5) is a *fit*, not
+a measurement. Two side results from the same dump are usable, though, because they are not condition-split:
+`Jank3.CompositorThread.WheelScroll` (n = 102, mean 2.0) **confirms the gesture registered as a real
+compositor scroll** — i.e. the §7g harness does enter `is_handling_interaction` territory — and
+`PercentDroppedFrames3.CompositorThread.CompositorAnimation` = **0.5**, again "jank, not dropped frames" (§6).
+
+> **Correct protocol for attempt #2** (the pooling is the only thing that went wrong): **two fresh launches**
+> (`--user-data-dir=/tmp/x`), each ~30 s, **one scrolled from the first frame to the last and one never
+> scrolled** — an in-session pair rather than a comparison against an older published number, matching §5f's
+> within-clip self-validation. Read via the filtered page `chrome://histograms/Graphics.Smoothness.Jank3`
+> (Monitoring Mode), keeping the repro and the histogram page in **separate visible windows** so neither is
+> backgrounded and throttled. The scrolled arm must contain **no unscrolled animation time at all**.
+
 **Three things it already establishes:**
 
 1. **A fourth confirmation path that needs nothing but stock Chrome** — no flag, no camera, no build, no
