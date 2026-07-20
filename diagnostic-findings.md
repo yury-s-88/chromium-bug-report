@@ -1157,6 +1157,88 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
 
 ---
 
+## 8. The suppressor series — what it is *not* *(measured, 2026-07-19/20)*
+
+§7h's dive found no capture-specific branch in the present path and concluded, from that absence, that the
+suppressors operate through macOS presentation behaviour. This section replaces that inference with
+measurement — and, in doing so, **puts one of this report's own standing claims in question.**
+
+**Method.** Ten `chrome://histograms` captures on the reproduced build, one condition each, DevTools closed
+unless named, panel confirmed at 120 Hz in every run (`Viz.ExternalBeginFrameSource.Interval` = 8.0 ms
+throughout). The visual state was recorded by eye per run, which for a reproduces/does-not-reproduce call is
+this report's own admitted standard (§2).
+
+### 8a. What actually suppresses
+
+| condition | suppresses? |
+|---|---|
+| DevTools **merely open** — Console, or `html`/`body`/a row selected | **no — still jerky**, and *independent of which window is active* |
+| DevTools open, node selected, **then the page reloaded** (selection persists) | **yes — but unstable**; switching tab and back brought the jerk back for seconds |
+| screen recorder running (OBS / ScreenCaptureKit) | **yes** |
+| scrolling **any** other window — second Chrome window **or Finder** | **yes** |
+| a static second window (TextEdit, or a Chrome window with a blank tab) | no |
+| a second window **playing video** — continuous compositing, no input | **no** |
+| second window active vs inactive | no difference |
+
+**Three hypotheses died here, each by measurement, in order:** *window focus* (refuted — merely-open
+DevTools is jerky whichever window is key); *continuous compositing activity elsewhere* (refuted — the video
+window does exactly that and changes nothing); *user input pinning the panel* (refuted together with the
+variable-refresh hypothesis by the external fixed-120 Hz result above). None survived. They are recorded
+because they were tested, not guessed.
+
+### 8b. Chrome cannot see it — across **every** counter it has
+
+The scroll case is fully explained and **visible**: scrolling a foreign window leaks some interaction into
+Chrome (`kInteractionOnly` + `kAnimationAndInteraction` ≈ 5 %), those frames take the deferred commit
+(≈ 5.5 %), and `Jank3` improves accordingly (12.4 → 10.8, with 12–13 % of sequences jank-free — the first
+non-zero such fraction outside the flag and §7g conditions). Finder and a second Chrome window give the same
+numbers, which also proves those frames are the **repro's own** Display: Finder is a different process and
+writes no Chrome UMA.
+
+*But ~5 % of frames on the aligned path cannot account for full visual smoothness*, and the observer cases
+show nothing at all:
+
+> Across **3772 counters** present in all captures, **not one** separates a confirmed-smooth run from a
+> jerky one. The comparison includes a smooth capture with **39 429** swap samples and **135** jank
+> sequences. Every apparent separator — `DrawToSwapUs`, `ScheduleOverlayToSwapStart`,
+> `RendererMainThreadLoad`, `TotalPixelsRendered` — turns out to be monotone in **run length**, with the
+> longest jerky run landing on top of the smooth one (`ScheduleOverlayToSwapStart` 141.9 vs 140.6 µs).
+
+Commit mode, swap→commit distribution, begin-frame interval, backpressure, the gating predicate, jank and
+dropped-frame counters are all **identical** between a visually smooth run and a visually jerky one.
+
+**`Jank3` is not blind — it is exact about what it measures**, which is the diagnosis:
+
+| | does Chrome's behaviour change? | does `Jank3` move? |
+|---|---|---|
+| `VSyncAlignedPresentation` flag | **yes** — commit becomes deferred | **yes**: 11.5 → 0.1 |
+| scrolling (§7g) | **yes** — same deferred commit | **yes**: 12.4 → 0.1 |
+| DevTools / recorder / second window | **no** — commit unchanged | **no**: stays ~12 |
+
+So Chrome emits identically-phased frames in both states, and the display does something different with
+them. §7h's inference is now a measurement.
+
+### 8c. The claim this puts in question *(unresolved — flagged, not patched)*
+
+The README and §5f state that opening DevTools suppresses the bug, on camera evidence: the DevTools-open
+control reads **97 %** (`IMG_3833`) against **54 %** for the same condition without, and `IMG_3850` reads
+**93 %** on `diagnostic.html`. Those are real measurements.
+
+But in this series, **DevTools merely open did not suppress anything** — repeatedly, on Console and on
+Elements, with and without a node selected, active window or not. Suppression appeared only in a narrower
+and unstable state (node selected **and** the page reloaded), and decayed within seconds.
+
+Both cannot be simply true as stated. The honest reading is that the *trigger* is narrower and far less
+stable than "DevTools is open", and that earlier runs happened to sit in the suppressing state — but that is
+an interpretation, not a result. **Until it is re-run deliberately, this report should not assert that
+opening DevTools suppresses the bug without qualification.** The README wording has been softened
+accordingly; the camera numbers stand as recorded, since they are what was measured at the time.
+
+*(Note the observer-type suppression is invisible to `Jank3` — so a re-run must be judged by eye or by
+camera, not by the histogram, which will read ~12 either way.)*
+
+---
+
 ## What is resolved / still open
 
 **Resolved**
@@ -1261,7 +1343,10 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   — read `Compositing.Display.SwapStartToSwapEnd` and `GPU.Presentation.FrameHandlesAnimationOrInteraction`
   with DevTools open. Either the frames move onto the deferred commit (suppression explained in Chrome code)
   or they do not (the aligned-commit route excluded by direct measurement). No trace, no camera, no
-  suppression-prone channel. **Also newly found:** the gating predicate is an **OR across every surface in
+  suppression-prone channel. **→ That measurement has since been made: see §8.** The aligned-commit route is
+  **excluded**, no counter of the 3772 available distinguishes the two states, and the trigger turns out to
+  be narrower and less stable than "DevTools is open" — which puts the report's own suppression claim in
+  question (§8c). **Also newly found:** the gating predicate is an **OR across every surface in
   the Display**, so a *second* surface reporting interaction aligns the whole frame — the mechanism shape
   this dive was looking for and could not find, because it is not a capture-specific branch.
 - **Backpressure poll: factor or not — ANSWERED, excluded** *(measured)*. `Gpu.Mac.BackpressureUs` read on

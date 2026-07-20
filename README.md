@@ -11,9 +11,13 @@ then jumps proportionally further.
 
 With DevTools open, the same two animations on the same panel in the same session advance on **97 %**.
 
-**Opening DevTools usually suppresses the issue.** So does running a screen recorder, and so does attaching
-CDP. **Every on-machine observation channel tested improves it**, which is why every measured cadence figure
-below was obtained with an **external 240 fps camera** filming the screen.
+**On-machine observation channels change what they observe.** With DevTools open the same conditions
+measured **97 %** against **54 %** without; a screen recorder and an attached CDP session behave likewise.
+That is why every measured cadence figure below was obtained with an **external 240 fps camera** filming the
+screen. *(A later series narrowed this: merely having DevTools open did **not** suppress it in those runs —
+the suppressing state was narrower and decayed within seconds. The trigger is less stable than "DevTools is
+open", and is unresolved; see §8c of [`diagnostic-findings.md`](diagnostic-findings.md). The figures above
+stand as measured.)*
 
 Firefox on the same machine and display does not reproduce it.
 
