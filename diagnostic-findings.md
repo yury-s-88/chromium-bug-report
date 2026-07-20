@@ -1401,10 +1401,20 @@ window that is a step of roughly **11 px** — a sharp threshold, not a gradient
 page geometry**, and nothing in this report had that axis.
 
 **And in that same short-`body` configuration, hovering `body` in Elements brings the jerk back.** So the
-inspector overlay here acts as a **trigger**, not a suppressor. That inverts §8a/§8d's framing, and it fits:
-both the overlay and `body`'s height change the same underlying thing — the geometry and layerisation of
-what gets composited. On this reading DevTools was never a "suppressor" in its own right; it was perturbing
-geometry, and which way it perturbed depended on the extent it covered.
+inspector overlay here acts as a **trigger**, not a suppressor. That inverts §8a/§8d's framing.
+
+A tempting unification — "DevTools was never a suppressor, it was perturbing geometry" — has to be stated
+narrowly, because **DevTools was undocked in every run of this series**. An undocked front-end lives in its
+own window and **does not change the page's viewport at all**; the page window keeps its size. So the two
+axes are not the same perturbation:
+
+- **the page's own layout** — `body`'s height changes what the page lays out and composites;
+- **the inspector overlay** — content painted *into* the page, changing what the compositor has to handle
+  for it, with the viewport untouched.
+
+Both act on the composited geometry of that one page, by different routes. Whether that is enough to make
+them one mechanism is **not established**, and the docked case — where DevTools genuinely does resize the
+viewport — has never been tested here at all.
 
 **Two things must be pinned down before any of this is quoted, and the second is the important one:**
 
@@ -1415,7 +1425,8 @@ geometry, and which way it perturbed depended on the extent it covered.
    DevTools entirely, and test. If it does, this is an **independent axis** with nothing to do with the
    inspector — and it becomes a candidate explanation for the upstream non-reproductions (§9, comments #2
    and #5), since window size differs between machines and nothing in the report has ever specified it
-   beyond "wide enough". If it only holds with DevTools open, it stays inside §8.
+   beyond "wide enough" (and that was about card A's horizontal travel, never about height). If it only
+   holds with DevTools open, it stays inside §8.
 
 *(Recorded immediately and deliberately raw: the observations are two by-eye readings and their exact
 conditions — whether DevTools was open during the 20 %/21 % comparison — are not yet established.)*
