@@ -76,6 +76,40 @@ appears on resize and then decays — and is stricter than 40820525 needs, where
 that is also live by default. Both are the same vsync-aligned commit, so the mechanism holds; the predicate
 does not. Order was also not counterbalanced (scrolled first). See §7g for the full caveat list.
 
+## `extracts/` — the condition series (`diagnostic-findings.md` §8 and the display series)
+
+Eleven further captures, one condition each. These are **extracts, not full dumps** — see the note below.
+
+| file | condition | what it supports |
+|---|---|---|
+| `commit-mode-bimodal.txt` | mixed scrolled/unscrolled session | `Compositing.Display.SwapStartToSwapEnd` is **bimodal** — immediate commit ~0.1–0.6 ms vs deferred peaking at 7277 µs against an 8.33 ms interval; `GPU.Presentation.FrameHandlesAnimationOrInteraction` puts **48.3 %** of frames on the interaction gate against **49 %** in the deferred modes |
+| `suppressor-baseline.txt` | nothing open, jerky | §8 baseline |
+| `suppressor-devtools-window-node-selected.txt` | DevTools undocked, node selected — **jerky** | §8a |
+| `suppressor-devtools-smooth.txt` | DevTools, node selected, page reloaded — **visually smooth** | §8b: `Jank3` **12.4**, 0 % of sequences at zero, commit 99.3 % immediate — identical to the jerky runs |
+| `suppressor-second-window-static.txt` | static second window — jerky | §8a |
+| `suppressor-obs-recording.txt` | screen recorder running | §8a |
+| `suppressor-second-window-chrome-scrolled.txt` | scrolling a second **Chrome** window | §8b |
+| `suppressor-second-window-finder-scrolled.txt` | scrolling a **Finder** window | §8b — same numbers as the Chrome case, which proves the interaction frames are the **repro's own** Display: Finder is a different process and writes no Chrome UMA |
+| `display-external-120hz.txt` | external LG C2, fixed 120 Hz — **jerky** | the bug is not ProMotion-specific |
+| `display-external-120hz-vsyncaligned-flag.txt` | same display + the flag — **smooth** | `Jank3` **0.00**, every sequence jank-free (n = 9) |
+| `display-external-60hz-REJECTED-cumulative.txt` | same display set to 60 Hz | **REJECTED as a 60 Hz measurement** — monitoring was not reset, so `Viz.ExternalBeginFrameSource.Interval` reads 97.3 % at 8 ms and only 1.8 % at 16 ms: ~98 % of it is the preceding 120 Hz period. Published because this report publishes rejected runs; the 60 Hz result is by-eye only |
+
+**Why these are extracts, and what that costs.** A full `chrome://histograms` capture on a real profile is
+~3 MB and holds ~4700 counters, most unrelated and some personal — stored-autofill entity counts including
+document types, clipboard word counts, download and navigation statistics. Those are not publishable in a
+bug report. `analysis/extract_histograms.py` keeps only `Graphics.Smoothness.*`, `Compositing.Display.*`,
+`GPU.Presentation.*`, `Gpu.Mac.*` and `Viz.*`, copying each matching block **verbatim** — so every number
+here is byte-identical to what Chrome printed, and 79 counter names survive out of ~4700.
+
+**The cost is stated rather than hidden:** §8b's result — *0 of 3772 counters separates a confirmed-smooth
+run from a jerky one* — is a whole-dump survey and **cannot be repeated from these extracts**. The full
+captures are not published for the reasons above. `analysis/compare_histograms.py scan` is published so
+anyone can repeat the survey on their own captures, which take ~2 minutes to produce.
+
+**Reproduce any row:** `chrome://histograms` → *Switch to Monitoring Mode* → set up the condition → run A+B
+on Loop ~30 s → *Refresh* → select all, save → `python3 analysis/extract_histograms.py DUMP.txt`. Reset
+monitoring between conditions; the 60 Hz row above is what happens when you do not.
+
 **Headline:** for the compositor `transform` animation (card B), `Jank3` collapses **11.5 → 0.1** with the
 flag, while `PercentDroppedFrames` stays **0** throughout — Chrome's own telemetry confirms both the bug and
 the fix, and confirms the report's "*not* dropped frames" wording. This is *why* the issue hid: standard

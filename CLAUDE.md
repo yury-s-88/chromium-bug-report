@@ -39,6 +39,16 @@ python3 analysis/decode_frame_ids.py ~/Downloads/IMG_3832.mov $STRIP --csv resul
 
 # Regenerate footage/segments.csv (expects the clips in the given dir; imports the other two scripts)
 python3 analysis/build_segments.py ~/Downloads > footage/segments.csv
+
+# ── Telemetry (no footage needed; these two take chrome://histograms captures, not clips) ──
+# Strip a full dump to the presentation-path counter families. Full dumps are NEVER committed:
+# ~4700 counters from a live profile, some personal. Extracts keep ~79 and are byte-identical.
+python3 analysis/extract_histograms.py ~/Downloads/dump.txt > telemetry/extracts/NAME.txt
+
+# Compare conditions side by side, or survey every counter for one that separates two groups.
+python3 analysis/compare_histograms.py summary base=telemetry/extracts/suppressor-baseline.txt \
+                                               smooth=telemetry/extracts/suppressor-devtools-smooth.txt
+python3 analysis/compare_histograms.py scan --a smooth=FULL_DUMP_A.txt --b jerky=FULL_DUMP_B.txt
 ```
 
 There is no test suite, lint, or CI. "Testing" a change means re-running the relevant script on
@@ -56,6 +66,12 @@ The three scripts are a system, not independents. Points that require reading se
   as stillness — a convincing wrong answer that has bitten this report before.
 - **`build_segments.py` imports `track_cadence` and `decode_frame_ids` as modules** (reuses their
   `profile`/`shift`/`decode`/`sampling_rate`). That's why `__pycache__/` is gitignored.
+- **Telemetry is a third, footage-free channel — and full dumps must never be committed.** `chrome://histograms`
+  captures are a *passive counter read*, so unlike DevTools/recorder/CDP they do not suppress the bug, and
+  they are what §6/§8 rest on. But a full dump holds ~4700 counters from a live profile including personal
+  ones (stored-autofill entity counts, clipboard, downloads). Only `extract_histograms.py` output goes in
+  `telemetry/extracts/`. The cost is recorded in both READMEs: the whole-dump survey behind §8b cannot be
+  repeated from the extracts, only from fresh captures.
 - **The two measurements are deliberately redundant, not interchangeable.** `track_cadence.py` is
   *primary* — it instruments the page at all (pure pixel cross-correlation). `decode_frame_ids.py`
   is *secondary* — it reads the rAF id stamp, which is itself one main-thread DOM write per frame,

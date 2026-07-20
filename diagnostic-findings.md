@@ -1207,6 +1207,13 @@ show nothing at all:
 Commit mode, swap→commit distribution, begin-frame interval, backpressure, the gating predicate, jank and
 dropped-frame counters are all **identical** between a visually smooth run and a visually jerky one.
 
+*(Verifiability, stated plainly: the per-condition captures are published as **extracts** in
+[`telemetry/extracts/`](telemetry/extracts/) — the presentation-path counter families only, copied
+verbatim — because a full dump carries ~4700 counters from a live profile, including personal ones. The
+3772-counter survey therefore **cannot be repeated from what is published**; it was run on the full local
+captures. `analysis/compare_histograms.py scan` is published so the survey can be repeated on any captures,
+which take ~2 minutes to make.)*
+
 **`Jank3` is not blind — it is exact about what it measures**, which is the diagnosis:
 
 | | does Chrome's behaviour change? | does `Jank3` move? |
