@@ -78,7 +78,8 @@ measurements — localised the cause and confirmed a fix. Details and per-claim 
   every sequence jank-free). That is the rate control the 120-vs-60 comparison below never had — it switched
   an *adaptive* panel to a *fixed* mode, changing the panel's mode along with the rate — and it also
   confirms the **fix works off ProMotion**, where it had only ever been camera-tested on the internal panel.
-  Detail and caveats: §5g of [`diagnostic-findings.md`](diagnostic-findings.md).
+  Detail and caveats: the *Variable vs fixed refresh* entry under **What is resolved** in
+  [`diagnostic-findings.md`](diagnostic-findings.md).
 
 * **A measurement asymmetry worth stating plainly.** On macOS Chrome does not know when a frame was
   actually presented — it **models** it (`PresentationFeedback` is built from the display-link's *predicted*
