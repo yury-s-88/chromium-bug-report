@@ -1438,14 +1438,33 @@ readings fit. Resizing the window and re-finding the boundary separates them, an
 different things — an absolute value at something quantised (a tile size, a layer limit), a ratio at
 something about the viewport.
 
-**A first attempt at that measurement was made and is REJECTED — the same way the 60 Hz capture was.**
-The 181 px and 182 px captures are not independent: bucket-for-bucket the second contains the first
-(bucket 0 is exactly **78** in both, bucket 1 exactly **75**, bucket 2 exactly **41**), and it adds only
-**16 sequences**. Monitoring was not reset between them, so the second measures ~16 sequences of the
-182 px state on top of the whole 181 px state. No comparison is possible, and the apparent "identical
-`Jank3`" is an artefact. *(The only thing visible in the delta: none of those 16 sequences is jank-free,
-consistent with the jerky state — but n = 16 carries nothing. Whether the 181 px capture is itself clean
-is also unknown.)*
+**Five capture attempts were made and ALL FIVE are REJECTED — they are one continuous accumulating
+session.** Every capture contains the previous one, bucket for bucket:
+
+| capture | n | bucket 0 | bucket 1 | bucket 2 | contains the previous? |
+|---|---:|---:|---:|---:|---|
+| 181 px | 853 | 78 | 75 | 41 | — |
+| 182 px | 869 | 78 | 75 | 41 | **yes** |
+| 120 px | 904 | 80 | 78 | 44 | **yes** |
+| 190 px | 931 | 80 | 81 | 45 | **yes** |
+| pointer-motion, normal height | 941 | 80 | 81 | 45 | **yes** |
+
+Chrome was not restarted and Monitoring Mode was not reset, so each condition contributed only **10–35
+sequences** buried under an accumulated 850+. No condition is measured in isolation and no comparison is
+possible; the near-identical means across the five are an artefact of the shared history, not a result.
+
+**This is the third time this class of error has occurred** (the pooled scroll test, the 60 Hz capture, and
+now this chain), so the protocol is replaced with one where it cannot happen — see below.
+
+**And a by-eye observation survives that matters more than the captures would have.** In this session
+**181 px stuttered**, where in the previous one it was smooth. **The boundary is not stable across
+sessions.** Taken with the multi-second settling and decay established in §8a, that raises a real
+possibility the earlier entry did not consider: **the "sharp 1 px threshold" may not be a threshold at all**
+— if the state drifts on a timescale of seconds, then changing the height and looking promptly returns
+whichever state happened to be current, and 20 %/21 % and 181/182 px would be coincidences rather than a
+boundary. The geometry axis is **not withdrawn** — something did change reproducibly with height — but it
+is **much softer than §8e first recorded**, and settling time must be waited out on every reading before
+any threshold is claimed again.
 
 **The harness now removes the obstacle that caused it.** Setting the height meant editing a style in
 DevTools — itself one of the conditions under investigation, and lost on reload — so a clean capture was
@@ -1453,10 +1472,22 @@ awkward to stage. `diagnostic.html` now takes **`?bodyHeight=181px`**, applied o
 and announced on screen, so the condition can be set with **DevTools closed** and survives the relaunch a
 clean capture wants.
 
-**The protocol, with the trap named:** *Refresh does not reset Monitoring Mode.* Per condition — relaunch
-Chrome (`--user-data-dir=/tmp/hN`), open `diagnostic.html?bodyHeight=181px`, click **Switch to Monitoring
-Mode**, run A+B on Loop ~30 s, Refresh, save; then repeat from a fresh launch with `182px`. Equal
-durations, and confirm the on-screen banner shows the height that was intended.
+**The protocol is replaced: do not use Monitoring Mode at all.** A fresh Chrome process starts with *empty*
+histograms, so the plain page already *is* that session's delta — which makes the accumulation failure
+structurally impossible rather than something to remember not to do.
+
+Per condition, from a fully quit Chrome:
+
+```
+open -na "Google Chrome" --args --user-data-dir=/tmp/h1
+#   tab 1: diagnostic.html?bodyHeight=181px   <- check the on-screen banner
+#   tab 2: chrome://histograms/Graphics.Smoothness.Jank3
+#   run A+B on Loop ~30 s, wait out the settling, then read tab 2 — no Monitoring Mode, no Refresh dance
+```
+
+Then **quit Chrome completely** and repeat with `182px` and a different `--user-data-dir`. Equal durations.
+Sanity check before trusting any pair: the `n` values should be **similar and independent**, never one
+containing the other.
 
 **And this is still the measurement that could finally make a counter move.** Every histogram comparison in §8b
 failed because the two states differed only in what DevTools was doing, which Chrome does not observe. Here
