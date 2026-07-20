@@ -1479,6 +1479,49 @@ camera, not by the histogram, which will read ~12 either way.)*
 
 ---
 
+## 9. Upstream thread record *(provenance)*
+
+Filed as **[issue 534417001](https://issues.chromium.org/issues/534417001)** — *"CSS layout animation is
+presented irregularly on 120 Hz ProMotion macOS, and a concurrent transform"*. Component **Blink >
+Compositing**, **P2**, hotlists `Triaged-ET` / `TE-NeedsTriageHelp`, status update *"No update yet"*. This
+section exists so that any claim in this report about what upstream has been told is checkable against a
+specific comment rather than asserted.
+
+| # | date | who | what |
+|---|---|---|---|
+| 1 | 2026-07-14 | reporter | the report: repro, camera-measured cadence, the observation-channel suppression, repo link |
+| 2 | 2026-07-15 | Test Engineering | **could not reproduce** on a MacBook Pro M5 — comment states the ProMotion panel was **at 60 Hz**; attached a **screen-recorded** video; requested `chrome://version` and `chrome://gpu` |
+| 3 | 2026-07-15 | reporter | camera recordings linked; noted the attached video is a screen capture, one of the channels that suppresses, so it can neither confirm nor rule out; attached the requested files |
+| 5 | 2026-07-16 | Test Engineering | **could not reproduce on five Macs**, including after reviewing the camera recordings; removed `Unconfirmed`; asked the Blink>Compositing team to look |
+| 6 | 2026-07-16 | reporter | clarified the 120 Hz-capable vs fixed-120 Hz distinction; attached still frames from `IMG_3832` showing consecutive intervals with no visible update |
+| 7 | 2026-07-18 | reporter | **the flag**: `--enable-features=VSyncAlignedPresentation` substantially improves it; found by reading the macOS present path; DevTools on top of it adds nothing |
+| 8 | 2026-07-19 | reporter | **camera-free confirmation**: `Jank3` 11.5 → 0.1, `PercentDroppedFrames3` = 0 throughout; raw dumps attached |
+| 9 | 2026-07-20 | reporter | **this session's findings** — see below |
+
+**What comment #9 says** (attachments: `telemetry/jank3-scrolltest.phase1-scrolled.txt` and
+`…cumulative-after-unscrolled.txt`):
+
+1. Chrome already switches to the vsync-aligned path **during scrolling** — `Jank3` 0.1 while scrolling
+   against 12.4 while not, matching the flag's own 0.1; plus the two independent stock counters
+   (`SwapStartToSwapEnd` bimodality, `FrameHandlesAnimationOrInteraction` at 48.3 % against 49 % deferred).
+2. The impact tracks **display refresh rate**, and **is not ProMotion-specific** — an external LG C2 at a
+   fixed 120 Hz with VRR/ALLM/HDR/motion-interpolation off reproduces it; 60 Hz on the same display is
+   smooth; the flag on the same display gives `Jank3` 0.00. So reproducing it does **not require a
+   ProMotion Mac** — which speaks directly to #2 and #5.
+3. The **Gerrit history** of why the general path is disabled, with the `kRAF` trap named so the obvious
+   counter-proposal is pre-empted.
+4. Component suggestion `Internals > GPU > Internals`, and why this is distinct from 40820525.
+
+**Deliberately not raised upstream: §8c.** Merely-open DevTools did not suppress anything in the §8 series,
+which conflicts with this report's own camera-measured DevTools-open control (97 % against 54 %). That is
+**unresolved**, and raising it now would undercut an earlier claim without offering a replacement. It is
+recorded here, and belongs in a later update once it is settled either way.
+
+**Outstanding upstream:** no engineer from the owning team has commented; the only Chromium-side responses
+are the two Test Engineering non-reproductions. Awaiting a reaction to #9.
+
+---
+
 ## Method caveats
 
 - The trace and discriminator clips (`IMG_3841`, `IMG_3842`) were **handheld with soft focus**. Camera
