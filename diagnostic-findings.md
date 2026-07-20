@@ -1268,9 +1268,35 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   the repro machine: **66 674 samples, mean 1.7 µs, 97.2 % of them exactly 0**. The Metal 1 ms-quantised
   `Sleep` poll essentially never sleeps, so `ApplyBackpressure` is **not** the amplifier — the outcome §5c
   predicted from code reading. *(Moved here from Open.)*
-- **Variable vs fixed refresh**: the macOS 120 Hz tested is ProMotion (variable); the 60 Hz was stable.
-  A *fixed* 120 Hz macOS panel (non-ProMotion) is untested, so "variable-refresh" is not isolated from
-  "high rate" on macOS.
+- **Variable vs fixed refresh — ANSWERED: it is the rate, not the variability** *(measured, 2026-07-20;
+  moved here from Open)*. The gap was that the macOS 120 Hz tested had always been ProMotion (adaptive)
+  while the smooth 60 Hz was fixed, so "high rate" and "variable rate" were confounded. Now separated on an
+  **external fixed 120 Hz panel** — LG C2 over HDMI, 3840×2160 @ 120 Hz, **extended** (not mirrored), **HDR
+  off**, **TruMotion/motion interpolation off**, repro window entirely on that display:
+
+  | | internal ProMotion | **external fixed 120 Hz** |
+  |---|---|---|
+  | rAF interval | — | median **8.30 ms**, **sd 0.16 ms**, p05 8.10 / p95 8.60 / max 9.00; 78 of 85 samples in 8.0–8.6 ms |
+  | by eye | jerky | **jerky** |
+  | `Jank3` | 12.5 | 10.1 |
+
+  The panel is demonstrably **stable** (sd 0.16 ms) and the bug still reproduces. **So high refresh rate is
+  sufficient; variable refresh is not required.** *(The `Jank3` 12.5 → 10.1 difference is not a display
+  effect: 8.8 % of frames on the TV run carried `is_handling_interaction` and 8.7 % took the deferred
+  commit — the §7g mechanism, matching the 8.5 % of jank-free sequences almost exactly. The remaining
+  ~91 % went the immediate path as always.)*
+
+  **Two consequences beyond closing the item.** First, **the bug is not ProMotion-specific** — it
+  reproduces on an ordinary fixed high-refresh display, with a different `CVDisplayLink`, a different
+  `Display`, and an unscaled 1× backing store instead of Retina 2×. The report's "ProMotion" framing names
+  the most common carrier, not the necessary condition; **any macOS display above ~60 Hz** should do.
+  Second, it removes a ready dismissal ("adaptive-refresh quirk") and widens the reproduction surface for
+  anyone triaging it.
+
+  *(Three hypotheses were raised and killed on the way here, each by measurement: that continuous
+  compositing activity elsewhere suppresses — refuted by a video playing in a second window with no effect;
+  that user input pins the panel — refuted by the same; and that the whole effect was variable-refresh
+  rather than rate — refuted above. Recorded because they were tested, not guessed.)*
 - **Does Perfetto tracing suppress?** Not cleanly resolved (camera for the trace clip was too noisy).
 
 **Next candidate steps**
