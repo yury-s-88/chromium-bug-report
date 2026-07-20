@@ -385,6 +385,68 @@ Note read #1 shares §1's tracing-suppression caveat, so it is not a substitute 
    amplifier; **both near-zero** ⇒ the backpressure wait is not where the time goes and the bad phase is the
    free-floating commit itself (the expected result, given §5d already fixed it by re-anchoring the phase).
 
+### 5e-bis. The commit deferral is directly measurable in stock Chrome *(source-readable + measured)*
+
+Two stock UMA counters turn out to observe the mechanism **per frame**, passively, with no camera, no
+build and no trace. Both are present in 150.0.7871.125 and were read from a full `chrome://histograms`
+dump on the repro machine.
+
+**1. `Compositing.Display.SwapStartToSwapEnd` measures swap-start → CALayer commit.** Traced end to end:
+`swap_start` is stamped in `SkiaOutputDevice::SwapInfo`'s constructor; `swap_end` in `SwapInfo::Complete()`,
+which is reached from the swap **completion callback**. On macOS that callback is *not* run by
+`CALayerTreeCoordinator::Present()` — `Present()` only pushes the frame onto `presented_frames_` and stores
+the callback. It is run inside **`CommitPresentedFrameToCA()`**, immediately after `frame.has_committed =
+true`. So this histogram is the **commit delay** — the quantity §5a/§5c are about.
+
+Measured distribution (A+B repro, stock Chrome; the session mixed scrolled and unscrolled phases, so the
+*proportions* are session-specific — the **modes** are what matter):
+
+| mode | swap-start → commit | share |
+|---|---|---:|
+| **immediate commit** | ~0.1–0.6 ms (peak 105–154 µs) | **51 %** |
+| **deferred by ~one refresh** | 6.0–8.8 ms, **peak at 7277 µs** | **~40 %** |
+| deferred by ~two refreshes | 13.0 / 15.7 ms | ~6 % |
+
+At a 8.33 ms frame interval a peak at **7.3 ms** is "waited for the next DisplayLink callback". The
+distribution is **bimodal with the two modes matching the two code paths** in `Present()` — nothing
+in between.
+
+**2. `GPU.Presentation.FrameHandlesAnimationOrInteraction` records the gating predicate itself.** Emitted by
+`RecordFrameTypes()` in `display.cc` with `kNone = 0, kInteractionOnly = 1, kAnimationOnly = 2,
+kAnimationAndInteraction = 3`. In the same session: 7.3 % / 21.7 % / 44.4 % / 26.6 % — i.e. **48.3 % of
+frames carried `is_handling_interaction`**, against **49 %** of frames in the deferred modes above. **Two
+independent counters, the same split.**
+
+**3. The predicate is an OR across every surface in the Display.** `Display::DrawAndSwap()`:
+
+```
+for (const auto& surface_id : aggregator_->previous_contained_surfaces()) {
+  has_interactive_frame |= surface->GetActiveFrameMetadata().is_handling_interaction;
+  has_animated_frame    |= surface->GetActiveFrameMetadata().is_handling_animation;
+}
+...
+swap_frame_data.is_handling_interaction = has_interactive_frame;
+```
+
+That value becomes `gfx::FrameData::is_handling_interaction`, which is what `Present()` gates on. So **any
+single surface reporting interaction puts the entire aggregated frame — every animation on the page — onto
+the vsync-aligned commit.** This is the shape the §7-era suppressor dive could not find: it was looking for
+a *capture-specific branch*, and there is none — there is an OR over a surface collection.
+
+**What this hands the open questions.** The suppressor question (§ "Open") becomes a **measurement**, not an
+interpretation. Run the repro with DevTools open (bug suppressed) and read both counters:
+
+- frames move into the **~7.3 ms** mode and/or `FrameHandlesAnimationOrInteraction` shows interaction ⇒
+  DevTools suppresses **by routing frames onto the deferred/aligned commit** — a complete, readable,
+  in-Chrome explanation;
+- frames stay in the **immediate** mode and the predicate stays at `kNone`/`kAnimationOnly`, yet the bug is
+  gone ⇒ the aligned-commit route is **excluded by direct measurement**, and the suppressor is macOS-side.
+
+Either outcome is decisive. The same pair also confirms §7g's route directly rather than by inference, and
+a **docked-vs-undocked** DevTools comparison probes the OR-across-surfaces path specifically (docked
+DevTools shares the page's Display; an undocked window has its own — *inferred from Chromium's
+window/compositor structure, not verified here*).
+
 ### 5f. Camera test of the fix — CONFIRMED for card B in A+B *(camera-measured, self-validating pair)*
 
 **`IMG_3848.mov` is the decisive clip.** A single **fixed-camera** (phone on a desk) recording carries
@@ -834,12 +896,23 @@ external 240 fps camera**, finding a true ~120 Hz advance (hold=2-dominant, 87 %
 
 **Caveats, in order of seriousness:**
 
-- **Which of two code branches produced the alignment is not isolated.** `Present()` sets
-  `delay_presentation_until_next_vsync` on default Chrome via *either*
+- **Which of two code branches produced the alignment — NARROWED, and the alternative is eliminated.** The
+  worry was that `Present()` can set `delay_presentation_until_next_vsync` via *either*
   `IsVSyncAlignedForScrolling() && data.is_handling_interaction` (the predicted path) *or* the separate
-  `… && NumPendingSwaps() > 1` clause, which is also live by default and could fire more often under scroll
-  load. **Both are the same vsync-aligned commit**, so the *mechanism* conclusion is unaffected — but this
-  measurement does not prove *which predicate* opened the door. Stated rather than glossed.
+  `… && NumPendingSwaps() > 1` clause. **The second cannot bootstrap.** `NumPendingSwaps()` is
+  `presented_frames_.size()` minus one if the front frame has committed, and the *only* exit from `Present()`
+  that leaves a frame uncommitted is `delay_presentation_until_next_vsync` itself. So in the default,
+  no-interaction case the queue is pinned at ≤ 1 and the clause is dead; a second uncommitted frame can only
+  exist *after* something else deferred one. The clause is therefore a **follow-on rule** (keep deferring
+  while the queue is backed up), not an alternative cause — **the predicate that opens the door must be
+  `is_handling_interaction`.** *(A hypothesis that this clause explained the DevTools suppression was raised
+  and refuted on the same reasoning; recorded because it was checked, not guessed.)*
+- **A pleasing side-consequence:** after a gesture ends, a still-uncommitted frame can keep
+  `NumPendingSwaps() > 1` true for a frame or two, so the aligned state drains rather than stopping dead —
+  which is why the by-eye observation above reads "returns to its previous cadence **almost** immediately".
+- **Now also confirmable directly** rather than by inference: §5e-bis's two counters show, per frame, whether
+  the commit was deferred (`Compositing.Display.SwapStartToSwapEnd`, ~7.3 ms mode vs ~0.2 ms mode) and
+  whether the gating predicate fired (`GPU.Presentation.FrameHandlesAnimationOrInteraction`).
 - **Order not counterbalanced** (scrolled first, then unscrolled) and **n is small** (18 / 16). The complete
   separation of the distributions makes drift an implausible explanation, but a reversed-order repeat would
   close it.
@@ -1184,9 +1257,17 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   of the flag's code path"; they **share the *locus*, not the implementation** — the **macOS CALayer commit →
   CoreAnimation present handoff**, where the flag and the bug also live. Direct readable test (needs a trace):
   whether DevTools shifts `CommitPresentedFrameToCA`'s `now_to_display` past the ~1.5 ms latch (§5e-1),
-  standing tracing caveat.
-- **Backpressure poll: factor or not** — expected non-factor (§5c). One passive read settles it:
-  `Gpu.Mac.BackpressureUs` ≈ 0 on the buggy default run ⇒ excluded.
+  standing tracing caveat. **→ Superseded by a better route: §5e-bis turns this into a passive measurement**
+  — read `Compositing.Display.SwapStartToSwapEnd` and `GPU.Presentation.FrameHandlesAnimationOrInteraction`
+  with DevTools open. Either the frames move onto the deferred commit (suppression explained in Chrome code)
+  or they do not (the aligned-commit route excluded by direct measurement). No trace, no camera, no
+  suppression-prone channel. **Also newly found:** the gating predicate is an **OR across every surface in
+  the Display**, so a *second* surface reporting interaction aligns the whole frame — the mechanism shape
+  this dive was looking for and could not find, because it is not a capture-specific branch.
+- **Backpressure poll: factor or not — ANSWERED, excluded** *(measured)*. `Gpu.Mac.BackpressureUs` read on
+  the repro machine: **66 674 samples, mean 1.7 µs, 97.2 % of them exactly 0**. The Metal 1 ms-quantised
+  `Sleep` poll essentially never sleeps, so `ApplyBackpressure` is **not** the amplifier — the outcome §5c
+  predicted from code reading. *(Moved here from Open.)*
 - **Variable vs fixed refresh**: the macOS 120 Hz tested is ProMotion (variable); the 60 Hz was stable.
   A *fixed* 120 Hz macOS panel (non-ProMotion) is untested, so "variable-refresh" is not isolated from
   "high rate" on macOS.
