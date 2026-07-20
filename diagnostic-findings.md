@@ -1392,10 +1392,33 @@ viewport-filling fill — partial, and it suppresses; selecting any descendant l
 > coverage would re-time the CALayer commit is offered here, and the earlier rows about second windows
 > remain unexplained by it.
 
-**One CSS change tests it, and separates geometry from node identity.** Give `body` a height smaller than
-the viewport (`height: auto`, or a fixed small height) so its box no longer fills the screen, then hover
-`body` again. If it turns smooth, the variable is **overlay extent** and `html`/`body` were never special.
-If it stays jerky, extent is not it either and the difference really is those two nodes.
+### 8e. The geometry threshold — a new axis, and possibly the important one
+
+The test above was run and produced something the whole section had not anticipated.
+
+**Setting `body { height: 20% }` makes the animation smooth. `21%` makes it jerky.** On the reproduced
+window that is a step of roughly **11 px** — a sharp threshold, not a gradient. **Reproduction depends on
+page geometry**, and nothing in this report had that axis.
+
+**And in that same short-`body` configuration, hovering `body` in Elements brings the jerk back.** So the
+inspector overlay here acts as a **trigger**, not a suppressor. That inverts §8a/§8d's framing, and it fits:
+both the overlay and `body`'s height change the same underlying thing — the geometry and layerisation of
+what gets composited. On this reading DevTools was never a "suppressor" in its own right; it was perturbing
+geometry, and which way it perturbed depended on the extent it covered.
+
+**Two things must be pinned down before any of this is quoted, and the second is the important one:**
+
+1. **The threshold in pixels, not per cent.** What is the viewport height, and at what `body` height (px)
+   does it flip? Does the boundary track the viewport (a ratio) or sit at an absolute pixel value? An
+   absolute value would point at something quantised — a tile size, a layer limit, a scrollbar appearing.
+2. **Does the threshold hold with DevTools *closed*?** Set the height from the page's own CSS, close
+   DevTools entirely, and test. If it does, this is an **independent axis** with nothing to do with the
+   inspector — and it becomes a candidate explanation for the upstream non-reproductions (§9, comments #2
+   and #5), since window size differs between machines and nothing in the report has ever specified it
+   beyond "wide enough". If it only holds with DevTools open, it stays inside §8.
+
+*(Recorded immediately and deliberately raw: the observations are two by-eye readings and their exact
+conditions — whether DevTools was open during the 20 %/21 % comparison — are not yet established.)*
 
 
 ---
