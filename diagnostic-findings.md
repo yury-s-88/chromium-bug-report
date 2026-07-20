@@ -1416,20 +1416,35 @@ Both act on the composited geometry of that one page, by different routes. Wheth
 them one mechanism is **not established**, and the docked case — where DevTools genuinely does resize the
 viewport — has never been tested here at all.
 
-**Two things must be pinned down before any of this is quoted, and the second is the important one:**
+**Both follow-ups were run.**
 
-1. **The threshold in pixels, not per cent.** What is the viewport height, and at what `body` height (px)
-   does it flip? Does the boundary track the viewport (a ratio) or sit at an absolute pixel value? An
-   absolute value would point at something quantised — a tile size, a layer limit, a scrollbar appearing.
-2. **Does the threshold hold with DevTools *closed*?** Set the height from the page's own CSS, close
-   DevTools entirely, and test. If it does, this is an **independent axis** with nothing to do with the
-   inspector — and it becomes a candidate explanation for the upstream non-reproductions (§9, comments #2
-   and #5), since window size differs between machines and nothing in the report has ever specified it
-   beyond "wide enough" (and that was about card A's horizontal travel, never about height). If it only
-   holds with DevTools open, it stays inside §8.
+- **The threshold sits at `body { height: 181px }`** on the window used. (20 % read 181 px there, so the
+  earlier per-cent figures and this one are the same boundary.)
+- **It holds with DevTools closed.** So this is an **independent axis** — nothing to do with the inspector,
+  and the first thing in this whole section that survives outside it.
+- **Continuously changing the value keeps it smooth** — holding the up-arrow on the height so it increments
+  and the element relayouts repeatedly is smooth *while it repaints*, even at values that are jerky when
+  static. Same family as the `#rafctl`-repainting and hover-overlay rows: continuous relayout of the page
+  keeps it smooth.
 
-*(Recorded immediately and deliberately raw: the observations are two by-eye readings and their exact
-conditions — whether DevTools was open during the 20 %/21 % comparison — are not yet established.)*
+**One over-claim from the previous entry is withdrawn.** This does **not** explain the upstream
+non-reproductions after all. In the unmodified repro `html, body { height: 100% }`, so `body` is the full
+viewport height on any real window — hundreds of pixels above a 181 px boundary. The unmodified page is
+always on the jerky side of it, whatever the machine or window size. The geometry axis is real, but it is
+not why comments #2 and #5 saw nothing.
+
+**Still open:** whether 181 px is **absolute or a ratio**. It was 20 % of that particular viewport, so both
+readings fit. Resizing the window and re-finding the boundary separates them, and the answer points at
+different things — an absolute value at something quantised (a tile size, a layer limit), a ratio at
+something about the viewport.
+
+**And this is the measurement that could finally make a counter move.** Every histogram comparison in §8b
+failed because the two states differed only in what DevTools was doing, which Chrome does not observe. Here
+the state is changed **by the page itself, with DevTools closed** — so Chrome's own instrumentation has a
+real chance of seeing it. Capture `chrome://histograms` at `body { height: 181px }` (smooth) and at a jerky
+height, DevTools closed both times, and compare — in particular `Compositing.Renderer.CALayerResult` and the
+overlay counters, since a change in whether the animated layer is promoted to a CALayer would land exactly
+in the present path this report is about.
 
 
 ---
