@@ -1489,7 +1489,41 @@ Then **quit Chrome completely** and repeat with `182px` and a different `--user-
 Sanity check before trusting any pair: the `n` values should be **similar and independent**, never one
 containing the other.
 
-**And this is still the measurement that could finally make a counter move.** Every histogram comparison in §8b
+**A clean pair was then captured — full restarts between conditions, independence verified — and the
+counter moved. In the wrong direction.**
+
+| | by eye | `Jank3` | n | buckets occupied |
+|---|---|---:|---:|---|
+| **181 px** | **jerky** | **5.36** | 14 | 3–12 |
+| **120 px** | **smooth** | **16.64** | 11 | 10–22+ |
+
+Neither capture contains the other. The distributions are **nearly disjoint** — the jerky state's maximum
+is 12, the smooth state's minimum is 10 — so despite the small samples this is a real separation, not noise.
+**The visually smooth state carries three times the modelled jank of the visually jerky one.**
+
+**Two readings, and the second is the one that matters:**
+
+1. *Another divergence between Chrome's present model and the display* — sharper than §8b's blindness, since
+   here the metric does not merely fail to track the eye, it **inverts**.
+2. **The "smooth" state may not be a fix at all — it may be a regularised lower rate.** A steady ~60 Hz looks
+   smooth to the eye while scoring high against a model expecting ~120 Hz, which is exactly the trap §5d
+   named when the flag was first tested: *"the flag run must show a true ~120 Hz advance — not a regularised
+   ~60 Hz that also looks smooth by eye but would mean the flag traded jerk for half-rate."* If that is what
+   the geometry change does, then §8e has it backwards: shortening `body` would be making the presentation
+   **worse** in a way the eye reads as better.
+
+**Nothing distinguishes those two from a histogram, by construction.** What distinguishes them is the
+camera and this report's own tooling: `analysis/track_cadence.py` on a clip of the 120 px state, read for
+**hold=2 dominance (true ~120 Hz) versus hold=4 dominance (regularised ~60 Hz)** — the same measurement that
+settled the flag in §5f. Until that is done, **§8e's "smooth" should be read as "looks smooth", nothing
+more**, and the geometry axis must not be quoted as an improvement.
+
+*(Sample-size caveat: n = 14 and 11, against 135 for a 30 s run earlier in this series — these captures are
+far shorter than the protocol asks for, and should be repeated at full length even though the separation is
+already clear.)*
+
+**And this was the measurement that could finally make a counter move — it did, and the lesson is that a
+moving counter is not the same as a confirmed direction.** Every histogram comparison in §8b
 failed because the two states differed only in what DevTools was doing, which Chrome does not observe. Here
 the state is changed **by the page itself, with DevTools closed** — so Chrome's own instrumentation has a
 real chance of seeing it. Capture `chrome://histograms` at `body { height: 181px }` (smooth) and at a jerky
