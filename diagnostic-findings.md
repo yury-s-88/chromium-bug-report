@@ -1501,6 +1501,20 @@ Neither capture contains the other. The distributions are **nearly disjoint** �
 is 12, the smooth state's minimum is 10 — so despite the small samples this is a real separation, not noise.
 **The visually smooth state carries three times the modelled jank of the visually jerky one.**
 
+**WITHDRAWN — a third run collapses it.** Repeating the 120 px condition after a fresh restart gives
+`Jank3` **11.42** (n = 33, buckets 4–19), against **16.64** (n = 11) for the same nominal condition
+minutes earlier, and **5.36** (n = 14) for 181 px. The within-condition spread is as large as the
+between-condition one, and the third run's range covers both of the others'. **The inversion was
+small-sample noise.** The reporter had also flagged that the two labels might have been swapped.
+
+So `Jank3` does **not** distinguish the geometry states either — which is consistent with §8b rather than
+an exception to it. All of these captures are far too short (n = 11–33 against 135 for a 30 s run), and
+nothing about the geometry axis should be read off a histogram until full-length runs exist.
+
+**What was written below has been kept, because the second reading remains the right caution even though
+its evidence evaporated** — "looks smooth" and "is presented at ~120 Hz" are still different claims, and
+only the camera separates them:
+
 **Two readings, and the second is the one that matters:**
 
 1. *Another divergence between Chrome's present model and the display* — sharper than §8b's blindness, since
@@ -1518,9 +1532,11 @@ camera and this report's own tooling: `analysis/track_cadence.py` on a clip of t
 settled the flag in §5f. Until that is done, **§8e's "smooth" should be read as "looks smooth", nothing
 more**, and the geometry axis must not be quoted as an improvement.
 
-*(Sample-size caveat: n = 14 and 11, against 135 for a 30 s run earlier in this series — these captures are
-far shorter than the protocol asks for, and should be repeated at full length even though the separation is
-already clear.)*
+**One structural observation from the same runs, unrelated to the histogram.** At short `body` heights the
+content overflows and **the document becomes scrollable**, which it is not at `height: 100%`. That is a real
+compositing difference — a scrollable document is layerised differently — and it is also a possible
+interaction with §7g, since scrolling is itself a suppressor. Any future geometry test must record whether
+the document scrolled and must not touch the scroll during a run.
 
 **And this was the measurement that could finally make a counter move — it did, and the lesson is that a
 moving counter is not the same as a confirmed direction.** Every histogram comparison in §8b
