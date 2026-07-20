@@ -68,6 +68,18 @@ measurements — localised the cause and confirmed a fix. Details and per-claim 
   in [`telemetry/`](telemetry/); method, the subtraction that yields the unscrolled arm, and the full caveat
   list (notably: it does not isolate *which* of two `Present()` branches aligned the commit) in **§7g**.
 
+* **Not ProMotion-specific — high refresh rate is what matters.** The title names ProMotion because that is
+  the common carrier, but the necessary condition is simply a **macOS display above ~60 Hz**. On an external
+  **LG C2 at a fixed 3840×2160 @ 120 Hz** (extended, HDR off, Game Mode with **VRR and ALLM explicitly off**,
+  motion interpolation off, the set's own signal board confirming 120 fps) the bug reproduces exactly as on
+  the internal panel — different `CVDisplayLink`, different `Display`, unscaled 1× instead of Retina 2×.
+  Three conditions on that one display, one variable at a time: **120 Hz → jerky** (`Jank3` 10.1);
+  **60 Hz → smooth**; **120 Hz + `--enable-features=VSyncAlignedPresentation` → smooth** (`Jank3` **0.00**,
+  every sequence jank-free). That is the rate control the 120-vs-60 comparison below never had — it switched
+  an *adaptive* panel to a *fixed* mode, changing the panel's mode along with the rate — and it also
+  confirms the **fix works off ProMotion**, where it had only ever been camera-tested on the internal panel.
+  Detail and caveats: §5g of [`diagnostic-findings.md`](diagnostic-findings.md).
+
 * **A measurement asymmetry worth stating plainly.** On macOS Chrome does not know when a frame was
   actually presented — it **models** it (`PresentationFeedback` is built from the display-link's *predicted*
   display time), and INP, EventLatency and CompositorLatency are all computed on that model, as are the
