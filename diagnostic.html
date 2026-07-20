@@ -438,6 +438,10 @@
   const bodyHeight = new URLSearchParams(location.search).get('bodyHeight');
   if (bodyHeight) {
     document.body.style.height = bodyHeight;
+    // Also in the tab title. A histogram dump carries no record of the page it came from, so a capture
+    // whose condition lives only in someone's memory is unusable — that has already cost one pair here.
+    // With it in the title, a single screenshot of the window ties the run to its condition.
+    document.title = `[body ${bodyHeight}] ` + document.title;
     // Say so on screen: a condition that is invisible in the UI is a condition that gets forgotten
     // between a capture and its write-up.
     $('hint').insertAdjacentHTML('beforeend',

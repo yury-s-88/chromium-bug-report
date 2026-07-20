@@ -1501,11 +1501,19 @@ Neither capture contains the other. The distributions are **nearly disjoint** �
 is 12, the smooth state's minimum is 10 — so despite the small samples this is a real separation, not noise.
 **The visually smooth state carries three times the modelled jank of the visually jerky one.**
 
-**WITHDRAWN — a third run collapses it.** Repeating the 120 px condition after a fresh restart gives
-`Jank3` **11.42** (n = 33, buckets 4–19), against **16.64** (n = 11) for the same nominal condition
-minutes earlier, and **5.36** (n = 14) for 181 px. The within-condition spread is as large as the
-between-condition one, and the third run's range covers both of the others'. **The inversion was
-small-sample noise.** The reporter had also flagged that the two labels might have been swapped.
+**WITHDRAWN — and for a worse reason than noise.** The reporter flagged that the height labels and the
+capture files may have been **swapped**. If so the numbers are not unstable, they are **unattributable** —
+which is a provenance failure, not a statistical one, and makes the pair unusable rather than merely weak.
+Repeating the 120 px condition after a fresh restart then gave `Jank3` **11.42** (n = 33, buckets 4–19)
+against **16.64** (n = 11) for the same nominal condition minutes earlier and **5.36** (n = 14) for 181 px,
+so the within-condition spread is as large as the between-condition one and small samples are a problem
+too — but the labelling comes first: a capture whose condition is not recorded *with* it proves nothing
+whichever way the numbers fall.
+
+**The harness now closes that hole.** `?bodyHeight=` already showed the value on screen; it now also
+prefixes the **document title**, so the tab strip carries the condition and one screenshot of the window
+ties a run to its height. A `chrome://histograms` dump records nothing about the page it came from, so
+without that the condition lives only in someone's memory — which is exactly what happened here.
 
 So `Jank3` does **not** distinguish the geometry states either — which is consistent with §8b rather than
 an exception to it. All of these captures are far too short (n = 11–33 against 135 for a 30 s run), and
