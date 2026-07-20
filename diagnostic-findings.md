@@ -1172,13 +1172,25 @@ this report's own admitted standard (§2).
 
 | condition | suppresses? |
 |---|---|
-| DevTools **merely open** — Console, or `html`/`body`/a row selected | **no — still jerky**, and *independent of which window is active* |
-| DevTools open, node selected, **then the page reloaded** (selection persists) | **yes — but unstable**; switching tab and back brought the jerk back for seconds |
+| DevTools **merely open** — Console tab, or `html` / `body` / `.row` selected | **no — still jerky**, and *independent of which window is active* |
+| DevTools open, **`#cardA` selected** (an *animating* element) | **apparently yes** — reported smooth; see the caveat below |
+| DevTools open, `.row` selected, **then the page reloaded** (selection persists) | **yes — but unstable**; switching tab and back brought the jerk back for seconds |
 | screen recorder running (OBS / ScreenCaptureKit) | **yes** |
 | scrolling **any** other window — second Chrome window **or Finder** | **yes** |
 | a static second window (TextEdit, or a Chrome window with a blank tab) | no |
 | a second window **playing video** — continuous compositing, no input | **no** |
 | second window active vs inactive | no difference |
+
+**This table under-describes the DevTools rows, and the gap is named rather than smoothed.** At least two
+variables are in play and they were not swept independently: *which node is selected*, and *whether the page
+was reloaded after selecting it*. What is recorded is that `html` / `body` / `.row` selected is jerky, that
+`.row` selected **plus a reload** is smooth, and that `#cardA` selected was reported smooth without a
+reload. The obvious reading — **that selecting an *animating* element is what matters**, `#cardA` being
+animated and `.row` being its static parent, which would be a concrete mechanism (the inspector observing a
+node can change how it is composited) — does not account for the `.row`-plus-reload row, and is therefore
+**not adopted**. The sweep that would settle it is small: with DevTools open and **no reloads**, select
+`html` → `body` → `.row` → `#cardA` → `#cardB` in turn and record which are smooth. Until then the DevTools
+rows here are observations, not a characterisation.
 
 **Three hypotheses died here, each by measurement, in order:** *window focus* (refuted — merely-open
 DevTools is jerky whichever window is key); *continuous compositing activity elsewhere* (refuted — the video
