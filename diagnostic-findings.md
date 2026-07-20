@@ -1296,6 +1296,30 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   commit — the §7g mechanism, matching the 8.5 % of jank-free sequences almost exactly. The remaining
   ~91 % went the immediate path as always.)*
 
+  **The same display then isolated the rate, and confirmed the fix off ProMotion.** Three conditions on
+  that one external panel, one variable changing at a time — same cable, same `CVDisplayLink`, same 1×
+  scaling, no ProMotion anywhere:
+
+  | LG C2, external | by eye | `Jank3` |
+  |---|---|---|
+  | 120 Hz, no flag | **jerky** | 10.1 (n = 483), 8.5 % of sequences at zero |
+  | 60 Hz, no flag | **smooth** | *not measured — see caveat* |
+  | 120 Hz, **`--enable-features=VSyncAlignedPresentation`** | **smooth** | **0.00** (n = 9), **100 %** at zero |
+
+  This is the rate control §3 never had: §3 switched an *internal ProMotion* panel between 120 Hz and a
+  fixed 60 Hz, so the panel's mode changed along with the rate. Here nothing changes but the number.
+  And the flag — until now camera-confirmed only on the internal panel (§5f) — **works on an external,
+  fixed-rate, non-ProMotion display too**, taking `Jank3` to zero with every sequence jank-free. So neither
+  the bug nor the fix is ProMotion-bound.
+
+  **Caveat on the 60 Hz row, stated because the dump does not support it.** Monitoring was not reset when
+  the refresh rate was changed, so that capture is cumulative: `Viz.ExternalBeginFrameSource.Interval` reads
+  **97.3 % at 8 ms and only 1.8 % at 16 ms**, i.e. ~98 % of its samples come from the preceding 120 Hz
+  period and only ~1.5 s of it is 60 Hz. The 60 Hz result is therefore **by eye only** — admissible for a
+  reproduces/does-not-reproduce call by this report's own standard (§2), but not a measurement, and the
+  dump must not be cited as one. *(The flag row is a filtered single-histogram capture; n = 9 is small, but
+  0.00 with 100 % at zero against a 10–12 baseline is not a marginal effect.)*
+
   **Two consequences beyond closing the item.** First, **the bug is not ProMotion-specific** — it
   reproduces on an ordinary fixed high-refresh display, with a different `CVDisplayLink`, a different
   `Display`, and an unscaled 1× backing store instead of Retina 2×. The report's "ProMotion" framing names
