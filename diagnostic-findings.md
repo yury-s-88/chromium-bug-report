@@ -1235,14 +1235,31 @@ But in this series, **DevTools merely open did not suppress anything** — repea
 Elements, with and without a node selected, active window or not. Suppression appeared only in a narrower
 and unstable state (node selected **and** the page reloaded), and decayed within seconds.
 
-Both cannot be simply true as stated. The honest reading is that the *trigger* is narrower and far less
-stable than "DevTools is open", and that earlier runs happened to sit in the suppressing state — but that is
-an interpretation, not a result. **Until it is re-run deliberately, this report should not assert that
-opening DevTools suppresses the bug without qualification.** The README wording has been softened
-accordingly; the camera numbers stand as recorded, since they are what was measured at the time.
+**This is not a camera-versus-eye conflict, and "measure it with a camera" will not settle it.** The camera
+measurement already exists, is published, and re-derives: `IMG_3833` is one of the three published clips and
+`analysis/track_cadence.py` reproduces its 97 % from it. `IMG_3850` is the sharper case — **the same
+`diagnostic.html`**, DevTools open, card B at **93 %**, on the same machine and build as the §8 series, which
+saw the same configuration stay jerky. The question is therefore **what differed between the two sessions**,
+not which instrument to trust.
 
-*(Note the observer-type suppression is invisible to `Jank3` — so a re-run must be judged by eye or by
-camera, not by the histogram, which will read ~12 either way.)*
+Two candidates, neither yet tested:
+
+- **Profile state.** The §8 series was run with a fresh `--user-data-dir` per condition, by protocol. A fresh
+  profile carries **no downloaded variations seed**, so the set of active features need not match a
+  normal profile's. That is a systematic confound across *every* cross-session comparison here, not just this
+  one. **Cheap check:** diff `chrome://version/?show-variations-cmd` between a fresh `/tmp` profile and the
+  normal one — the normal-profile dump is already attached to the upstream issue (comment #3), so only the
+  second is needed.
+- **Intermittency.** The suppressing state was directly observed to decay within seconds and return
+  (§8a). A camera clip that happened to span a suppressed period would read 93–97 %; a later series that did
+  not would read jerky. This explains the conflict with no further assumptions.
+
+**Until one of those is established, this report should not assert that opening DevTools suppresses the bug
+without qualification.** The README wording has been softened accordingly; the camera numbers stand exactly
+as recorded, since they are what was measured, from footage anyone can re-analyse.
+
+*(Whatever the re-run, it must be judged by eye or by camera: the observer-type suppression is invisible to
+`Jank3`, which reads ~12 in both states.)*
 
 ---
 
