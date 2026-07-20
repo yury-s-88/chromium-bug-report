@@ -339,18 +339,38 @@
     for (let b = 0; b < 8; b++) bits[b].classList.toggle('on', !!(n & (1 << (7 - b))));
   }
 
+  // The coarse `<10ms` bin used to swallow the whole question. ProMotion varies the panel
+  // between ~24 and 120 Hz; the interesting band — a panel drifting between, say, 100 and
+  // 120 Hz — is 8.3 to 10.0 ms, i.e. entirely inside one bin. Chrome's own
+  // Viz.ExternalBeginFrameSource.Interval histogram has the same defect (1 ms buckets, reads
+  // "8 ms, 100 %" in every condition). So this readout now reports the SPREAD, finely: if the
+  // display rate is what moves between the jerky and the suppressed states, it shows up here
+  // as a change in dispersion, not in the median.
+  //
+  // rAF cadence is driven by Chrome's BeginFrame source, which is driven by the CVDisplayLink
+  // callback — so it tracks the panel's vsync. It is still a CONTROL, not the detector: it says
+  // when frames were *offered*, never when they were *presented*.
   function renderControl(samples, n) {
     if (!samples.length) { rafctl.textContent = '—'; return; }
-    const bins = { '<10': 0, '10-14': 0, '14-20': 0, '>20': 0 };
-    for (const v of samples) {
-      if (v < 10) bins['<10']++; else if (v < 14) bins['10-14']++;
-      else if (v < 20) bins['14-20']++; else bins['>20']++;
+    const s = [...samples].sort((a, b) => a - b);
+    const q = f => s[Math.min(s.length - 1, Math.floor(f * s.length))];
+    const med = q(0.5);
+    const mean = s.reduce((a, b) => a + b, 0) / s.length;
+    const sd = Math.sqrt(s.reduce((a, b) => a + (b - mean) ** 2, 0) / s.length);
+    // Fine bins across the ProMotion band. 8.33 ms = 120 Hz, 10 ms = 100 Hz, 11.1 = 90, 16.7 = 60.
+    const edges = [8.0, 8.6, 9.2, 10.0, 11.5, 14.0, 20.0];
+    const bins = new Array(edges.length + 1).fill(0);
+    for (const v of s) {
+      let i = 0; while (i < edges.length && v >= edges[i]) i++;
+      bins[i]++;
     }
-    const med = [...samples].sort((a, b) => a - b)[samples.length >> 1];
+    const names = ['<8.0', '8.0-8.6', '8.6-9.2', '9.2-10', '10-11.5', '11.5-14', '14-20', '>20'];
+    const fine = names.map((nm, i) => bins[i] ? `${nm}:${bins[i]}` : null).filter(Boolean).join('  ');
     rafctl.textContent =
       `rAF CONTROL (not the detector)\n` +
-      `median ${med.toFixed(1)} ms · ~${(1000 / med).toFixed(0)} Hz · n=${samples.length}\n` +
-      Object.entries(bins).map(([k, v]) => `${k}ms: ${v}`).join('  ') +
+      `median ${med.toFixed(2)} ms · ~${(1000 / med).toFixed(1)} Hz · n=${s.length}\n` +
+      `spread  sd ${sd.toFixed(2)} ms · p05 ${q(0.05).toFixed(2)} · p95 ${q(0.95).toFixed(2)} · max ${s[s.length - 1].toFixed(2)}\n` +
+      fine +
       (n ? `\nrAF ids issued 001..${String(n).padStart(3, '0')}` : '');
   }
 
