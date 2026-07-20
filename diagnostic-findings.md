@@ -1443,11 +1443,14 @@ session.** Every capture contains the previous one, bucket for bucket:
 
 | capture | n | bucket 0 | bucket 1 | bucket 2 | contains the previous? |
 |---|---:|---:|---:|---:|---|
-| 181 px | 853 | 78 | 75 | 41 | — |
-| 182 px | 869 | 78 | 75 | 41 | **yes** |
-| 120 px | 904 | 80 | 78 | 44 | **yes** |
-| 190 px | 931 | 80 | 81 | 45 | **yes** |
-| pointer-motion, normal height | 941 | 80 | 81 | 45 | **yes** |
+| 1 | 853 | 78 | 75 | 41 | — |
+| 2 | 869 | 78 | 75 | 41 | **yes** |
+| 3 | 904 | 80 | 78 | 44 | **yes** |
+| 4 | 931 | 80 | 81 | 45 | **yes** |
+| 5 | 941 | 80 | 81 | 45 | **yes** |
+
+*(Conditions are not named here on purpose: nesting is provable from the counts alone, and which condition
+each capture belonged to is itself unreliable — see below.)*
 
 Chrome was not restarted and Monitoring Mode was not reset, so each condition contributed only **10–35
 sequences** buried under an accumulated 850+. No condition is measured in isolation and no comparison is
@@ -1489,56 +1492,37 @@ Then **quit Chrome completely** and repeat with `182px` and a different `--user-
 Sanity check before trusting any pair: the `n` values should be **similar and independent**, never one
 containing the other.
 
-**A clean pair was then captured — full restarts between conditions, independence verified — and the
-counter moved. In the wrong direction.**
+**A provenance-verified pair now exists, and it shows no difference.** With the condition carried in the
+page title — so the run and its height are tied together in the screenshot rather than in memory — and full
+restarts between conditions:
 
-| | by eye | `Jank3` | n | buckets occupied |
-|---|---|---:|---:|---|
-| **181 px** | **jerky** | **5.36** | 14 | 3–12 |
-| **120 px** | **smooth** | **16.64** | 11 | 10–22+ |
+| `Jank3.CompositorThread.CompositorAnimation` | n | mean | at zero | buckets |
+|---|---:|---:|---:|---|
+| `bodyHeight=120px` | 33 | **11.42** | 0 % | 4–19 |
+| `bodyHeight=181px` | 18 | **10.06** | 0 % | 3–18 |
 
-Neither capture contains the other. The distributions are **nearly disjoint** — the jerky state's maximum
-is 12, the smooth state's minimum is 10 — so despite the small samples this is a real separation, not noise.
-**The visually smooth state carries three times the modelled jank of the visually jerky one.**
+Neither contains the other; the ranges overlap almost entirely. **`Jank3` does not distinguish the geometry
+states** — the same blindness as §8b, not an exception to it.
 
-**WITHDRAWN — and for a worse reason than noise.** The reporter flagged that the height labels and the
-capture files may have been **swapped**. If so the numbers are not unstable, they are **unattributable** —
-which is a provenance failure, not a statistical one, and makes the pair unusable rather than merely weak.
-Repeating the 120 px condition after a fresh restart then gave `Jank3` **11.42** (n = 33, buckets 4–19)
-against **16.64** (n = 11) for the same nominal condition minutes earlier and **5.36** (n = 14) for 181 px,
-so the within-condition spread is as large as the between-condition one and small samples are a problem
-too — but the labelling comes first: a capture whose condition is not recorded *with* it proves nothing
-whichever way the numbers fall.
+**Two earlier attempts are discarded rather than reported.** One was the five-capture chain above, which is
+one accumulating session. The other was a pair that appeared to show a **threefold inversion** — the
+visually smooth state carrying more modelled jank than the jerky one — which was written up here and is now
+**withdrawn**: the reporter flagged that the height labels and the capture files may have been **swapped**,
+which makes those numbers *unattributable* rather than merely noisy, and a repeat of one of the two
+conditions landed between the two figures anyway. **Their values are not quoted**, because a number whose
+condition is unknown is not evidence in either direction.
 
-**The harness now closes that hole.** `?bodyHeight=` already showed the value on screen; it now also
-prefixes the **document title**, so the tab strip carries the condition and one screenshot of the window
-ties a run to its height. A `chrome://histograms` dump records nothing about the page it came from, so
-without that the condition lives only in someone's memory — which is exactly what happened here.
+**What the verified pair does and does not license.** n = 18 and 33 against 135 for a 30 s run earlier: this
+is enough to say **no large effect appears** — nothing like the threefold split that was briefly on the
+page — and not enough to exclude a modest one. It is an absence of evidence at this sample size, and should
+be read as such.
 
-So `Jank3` does **not** distinguish the geometry states either — which is consistent with §8b rather than
-an exception to it. All of these captures are far too short (n = 11–33 against 135 for a 30 s run), and
-nothing about the geometry axis should be read off a histogram until full-length runs exist.
-
-**What was written below has been kept, because the second reading remains the right caution even though
-its evidence evaporated** — "looks smooth" and "is presented at ~120 Hz" are still different claims, and
-only the camera separates them:
-
-**Two readings, and the second is the one that matters:**
-
-1. *Another divergence between Chrome's present model and the display* — sharper than §8b's blindness, since
-   here the metric does not merely fail to track the eye, it **inverts**.
-2. **The "smooth" state may not be a fix at all — it may be a regularised lower rate.** A steady ~60 Hz looks
-   smooth to the eye while scoring high against a model expecting ~120 Hz, which is exactly the trap §5d
-   named when the flag was first tested: *"the flag run must show a true ~120 Hz advance — not a regularised
-   ~60 Hz that also looks smooth by eye but would mean the flag traded jerk for half-rate."* If that is what
-   the geometry change does, then §8e has it backwards: shortening `body` would be making the presentation
-   **worse** in a way the eye reads as better.
-
-**Nothing distinguishes those two from a histogram, by construction.** What distinguishes them is the
-camera and this report's own tooling: `analysis/track_cadence.py` on a clip of the 120 px state, read for
-**hold=2 dominance (true ~120 Hz) versus hold=4 dominance (regularised ~60 Hz)** — the same measurement that
-settled the flag in §5f. Until that is done, **§8e's "smooth" should be read as "looks smooth", nothing
-more**, and the geometry axis must not be quoted as an improvement.
+**And the caution that came with the withdrawn inversion still stands on its own.** "Looks smooth" and "is
+presented at ~120 Hz" are different claims. A steady ~60 Hz reads smooth to the eye, and §5d named exactly
+that trap when the flag was first tested. Only the camera separates them — `analysis/track_cadence.py` read
+for **hold=2 dominance (true ~120 Hz) versus hold=4 dominance (regularised ~60 Hz)**, the measurement that
+settled the flag in §5f. Until that is done, §8e's "smooth" means **"looks smooth"**, and the geometry axis
+must not be quoted as an improvement.
 
 **One structural observation from the same runs, unrelated to the histogram.** At short `body` heights the
 content overflows and **the document becomes scrollable**, which it is not at `height: 100%`. That is a real
