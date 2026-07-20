@@ -1172,25 +1172,35 @@ this report's own admitted standard (§2).
 
 | condition | suppresses? |
 |---|---|
-| DevTools **merely open** — Console tab, or `html` / `body` / `.row` selected | **no — still jerky**, and *independent of which window is active* |
-| DevTools open, **`#cardA` selected** (an *animating* element) | **apparently yes** — reported smooth; see the caveat below |
-| DevTools open, `.row` selected, **then the page reloaded** (selection persists) | **yes — but unstable**; switching tab and back brought the jerk back for seconds |
+| DevTools open, **Console tab**, or `html` / `body` selected | **no — still jerky**, and *independent of which window is active* |
+| DevTools open, **`div.row` selected, or anything deeper** | **yes — but only after a delay of seconds**, not on selection |
+| DevTools open, node selected, then the page reloaded | yes — same state, reached via the reload |
 | screen recorder running (OBS / ScreenCaptureKit) | **yes** |
 | scrolling **any** other window — second Chrome window **or Finder** | **yes** |
 | a static second window (TextEdit, or a Chrome window with a blank tab) | no |
 | a second window **playing video** — continuous compositing, no input | **no** |
 | second window active vs inactive | no difference |
 
-**This table under-describes the DevTools rows, and the gap is named rather than smoothed.** At least two
-variables are in play and they were not swept independently: *which node is selected*, and *whether the page
-was reloaded after selecting it*. What is recorded is that `html` / `body` / `.row` selected is jerky, that
-`.row` selected **plus a reload** is smooth, and that `#cardA` selected was reported smooth without a
-reload. The obvious reading — **that selecting an *animating* element is what matters**, `#cardA` being
-animated and `.row` being its static parent, which would be a concrete mechanism (the inspector observing a
-node can change how it is composited) — does not account for the `.row`-plus-reload row, and is therefore
-**not adopted**. The sweep that would settle it is small: with DevTools open and **no reloads**, select
-`html` → `body` → `.row` → `#cardA` → `#cardB` in turn and record which are smooth. Until then the DevTools
-rows here are observations, not a characterisation.
+**The DevTools rows took three passes to state correctly, and the reason matters: the transition is not
+instantaneous.** Selecting a node does not switch the animation to smooth at the moment of the click — it
+takes **seconds**. Every earlier reading in this series was taken promptly, which is how the same condition
+(`div.row` selected) was first recorded as jerky and later as smooth: the first look happened before the
+state arrived. The same lag runs the other way — switching to another tab and back brought the jerk back
+"for a few seconds" — so the state has **hysteresis in both directions**. Any future observation here has to
+wait it out before being written down.
+
+With that applied, the boundary is by **depth in the DOM tree**: `html` and `body` do not suppress;
+`div.row` and deeper do. The reload row is not a separate mechanism — it reaches the same state, and simply
+supplied the delay.
+
+**An earlier reading is withdrawn.** This section previously floated that selecting an *animating* element
+was the trigger, `#cardA` being animated and `.row` its static parent. `div.row` is not animated and it
+suppresses, so that is wrong.
+
+**What is still missing is one datum:** `div.block`, the element between `body` and `div.row`. `body` does
+not suppress and `div.row` does; `div.block` sits between them and would place the boundary exactly. It also
+disambiguates "and anything deeper" — recorded from a report of "this and below", where *below* could mean
+deeper in the tree or later in the listing.
 
 **Three hypotheses died here, each by measurement, in order:** *window focus* (refuted — merely-open
 DevTools is jerky whichever window is key); *continuous compositing activity elsewhere* (refuted — the video
