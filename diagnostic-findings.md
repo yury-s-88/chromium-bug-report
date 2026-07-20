@@ -1211,16 +1211,45 @@ overlay work is unchanged — consistent with §8b's whole-dump result, and now 
 counters that would have shown it. The page also shows **no visible highlight**, so the overlay is not being
 drawn, yet the suppression happens.
 
-**Two cheap tests remain, and they bracket the question:**
+**Both tests were run, and a third result reframes the whole thing.**
 
-1. **Select a node inside `body`, wait for the state to arrive, then close DevTools.** If it stays smooth,
-   the state lives in the renderer or below and DevTools merely triggered it; if the jerk returns, DevTools
-   must stay alive to hold it.
-2. **Select something far from the animation** — `#hint`, `#panel` — rather than an ancestor of a card. If
-   those suppress too, the trigger is "some element inside `body` is inspected", with no relation to the
-   animated subtree.
+1. **Close DevTools after the state arrives → the jerk returns.** So DevTools must stay alive; the state is
+   not something it switches on and leaves behind.
+2. **Select `#hint`, far from the animation → still smooth.** So the trigger has **no relation to the
+   animated subtree** — any element inside `body` will do.
+3. **Cover the DevTools window completely with another window → the jerk returns. Leave even a few pixels
+   of it visible → smooth.**
 
-*(Both must be judged after waiting out the lag, and by eye: `Jank3` reads ~12 in both states.)*
+**(3) means macOS window occlusion.** A few pixels is exactly the threshold of `NSWindowOcclusionState`,
+which is binary. Chrome consumes it and treats a fully-occluded window as hidden, stopping its compositor.
+So the DevTools front-end must be **running** for the suppression to hold — occluding it simply switches it
+off.
+
+**A generalisation drawn from that was tested immediately and is wrong.** The tempting reading — that what
+matters is any second `viz::Display` drawing every frame, with DevTools incidental — was checked with **two
+Chrome windows both running the repro, side by side**. Neither suppresses: **both stutter.** A second Chrome
+Display drawing continuously is therefore **not sufficient**. Visibility of the DevTools window is
+*necessary but not sufficient*; the trigger is specific to DevTools.
+
+*(The video window that did not suppress was **QuickTime** — a different application, so that row never
+tested this question. The two-repro test above does test it, directly.)*
+
+**A claim made here has been withdrawn.** This section briefly recorded that the two windows stuttered
+*synchronously*, and reasoned from it that the judder must come from a stage shared below both — which
+would have supported §1/§5's localisation. **That was a misreading.** The report of "synchronously" was
+colloquial, meaning only that *the result was the same in both windows*; **phase synchrony was never
+measured.** Nothing here rests on it, and it should not be repeated.
+
+*(It would be worth measuring, and the existing tooling supports it: both windows in one camera frame with
+the rAF id stamp on, decoded per window with `analysis/decode_frame_ids.py`. Genuine phase-locked judder
+across two independent `viz::Display`s would be a cheap, direct demonstration that the loss is below
+per-page scheduling. Untested — listed as an idea, not a result.)*
+
+**So the trigger remains specific and unexplained:** DevTools running, not occluded, with **any element
+inside `body`** selected. `html` / `body` selected does not do it, and what the selection changes has not
+been shown. The Finder-scroll row is still unaccounted for (a different process, no Chrome Display at all;
+~5 % leaked interaction frames) and is plausibly a second, weaker mechanism. **No unified account is
+claimed.**
 
 **Three hypotheses died here, each by measurement, in order:** *window focus* (refuted — merely-open
 DevTools is jerky whichever window is key); *continuous compositing activity elsewhere* (refuted — the video
