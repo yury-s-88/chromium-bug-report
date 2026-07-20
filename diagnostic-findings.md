@@ -1173,7 +1173,7 @@ this report's own admitted standard (§2).
 | condition | suppresses? |
 |---|---|
 | DevTools open, **Console tab**, or `html` / `body` selected | **no — still jerky**, and *independent of which window is active* |
-| DevTools open, **`div.row` selected, or anything deeper** | **yes — but only after a delay of seconds**, not on selection |
+| DevTools open, **any element inside `body` selected** — `div.block`, `div.row`, deeper | **yes — but only after a delay of seconds**, not on selection |
 | DevTools open, node selected, then the page reloaded | yes — same state, reached via the reload |
 | screen recorder running (OBS / ScreenCaptureKit) | **yes** |
 | scrolling **any** other window — second Chrome window **or Finder** | **yes** |
@@ -1197,10 +1197,30 @@ supplied the delay.
 was the trigger, `#cardA` being animated and `.row` its static parent. `div.row` is not animated and it
 suppresses, so that is wrong.
 
-**What is still missing is one datum:** `div.block`, the element between `body` and `div.row`. `body` does
-not suppress and `div.row` does; `div.block` sits between them and would place the boundary exactly. It also
-disambiguates "and anything deeper" — recorded from a report of "this and below", where *below* could mean
-deeper in the tree or later in the listing.
+**The boundary is now placed.** `div.block` — the element between `body` and `div.row` — also suppresses. So
+the rule is not depth-in-general but a clean split: **`html` and `body` do not suppress; any element inside
+`body` does.**
+
+**The natural mechanical suspect has been checked and eliminated.** The obvious guess is that the inspector
+overlay adds a layer over the page and breaks CALayer promotion, which would land squarely in the present
+path this whole report is about. It does not: between the confirmed-smooth capture and a jerky one,
+`Compositing.Renderer.CALayerResult` is **0.0 in both**, and `Compositing.DirectRenderer.OverlayProcessingUs`
+(5.3 / 5.3), `Compositing.Display.DrawToScheduleOverlay` (212.3 / 210.6) and
+`Gpu.OutputSurface.ScheduleOverlaysUs` (139.8 / 141.2) are indistinguishable. Promotion is not failing and
+overlay work is unchanged — consistent with §8b's whole-dump result, and now checked on the specific
+counters that would have shown it. The page also shows **no visible highlight**, so the overlay is not being
+drawn, yet the suppression happens.
+
+**Two cheap tests remain, and they bracket the question:**
+
+1. **Select a node inside `body`, wait for the state to arrive, then close DevTools.** If it stays smooth,
+   the state lives in the renderer or below and DevTools merely triggered it; if the jerk returns, DevTools
+   must stay alive to hold it.
+2. **Select something far from the animation** — `#hint`, `#panel` — rather than an ancestor of a card. If
+   those suppress too, the trigger is "some element inside `body` is inspected", with no relation to the
+   animated subtree.
+
+*(Both must be judged after waiting out the lag, and by eye: `Jank3` reads ~12 in both states.)*
 
 **Three hypotheses died here, each by measurement, in order:** *window focus* (refuted — merely-open
 DevTools is jerky whichever window is key); *continuous compositing activity elsewhere* (refuted — the video
