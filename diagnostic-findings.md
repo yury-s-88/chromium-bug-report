@@ -1438,7 +1438,27 @@ readings fit. Resizing the window and re-finding the boundary separates them, an
 different things — an absolute value at something quantised (a tile size, a layer limit), a ratio at
 something about the viewport.
 
-**And this is the measurement that could finally make a counter move.** Every histogram comparison in §8b
+**A first attempt at that measurement was made and is REJECTED — the same way the 60 Hz capture was.**
+The 181 px and 182 px captures are not independent: bucket-for-bucket the second contains the first
+(bucket 0 is exactly **78** in both, bucket 1 exactly **75**, bucket 2 exactly **41**), and it adds only
+**16 sequences**. Monitoring was not reset between them, so the second measures ~16 sequences of the
+182 px state on top of the whole 181 px state. No comparison is possible, and the apparent "identical
+`Jank3`" is an artefact. *(The only thing visible in the delta: none of those 16 sequences is jank-free,
+consistent with the jerky state — but n = 16 carries nothing. Whether the 181 px capture is itself clean
+is also unknown.)*
+
+**The harness now removes the obstacle that caused it.** Setting the height meant editing a style in
+DevTools — itself one of the conditions under investigation, and lost on reload — so a clean capture was
+awkward to stage. `diagnostic.html` now takes **`?bodyHeight=181px`**, applied once before the first run
+and announced on screen, so the condition can be set with **DevTools closed** and survives the relaunch a
+clean capture wants.
+
+**The protocol, with the trap named:** *Refresh does not reset Monitoring Mode.* Per condition — relaunch
+Chrome (`--user-data-dir=/tmp/hN`), open `diagnostic.html?bodyHeight=181px`, click **Switch to Monitoring
+Mode**, run A+B on Loop ~30 s, Refresh, save; then repeat from a fresh launch with `182px`. Equal
+durations, and confirm the on-screen banner shows the height that was intended.
+
+**And this is still the measurement that could finally make a counter move.** Every histogram comparison in §8b
 failed because the two states differed only in what DevTools was doing, which Chrome does not observe. Here
 the state is changed **by the page itself, with DevTools closed** — so Chrome's own instrumentation has a
 real chance of seeing it. Capture `chrome://histograms` at `body { height: 181px }` (smooth) and at a jerky

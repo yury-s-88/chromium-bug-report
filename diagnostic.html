@@ -421,5 +421,30 @@
   loopBtn.addEventListener('click', () => { if (busyRun) return; narrowAbort = false; looping = true;  stopRequested = false; setRunning(true); runWindow(); });
   stopBtn.addEventListener('click', stopAll);
 
+  // ── §8e geometry probe: ?bodyHeight=181px ───────────────────────────────────────────────────
+  // Reproduction turns out to depend on the page's own geometry, with a boundary sharp to ~1 px
+  // (181 px smooth / 182 px jerky on one window). Setting that by hand meant editing the style in
+  // DevTools — which is itself one of the conditions under investigation, and which does not
+  // survive a reload or a fresh launch. This puts the knob in the URL instead, so the condition can
+  // be set with DevTools CLOSED and held across the relaunch that a clean histogram capture needs:
+  //
+  //     diagnostic.html?bodyHeight=181px      smooth on the window this was found on
+  //     diagnostic.html?bodyHeight=182px      jerky
+  //     diagnostic.html                       unchanged — body stays height:100%
+  //
+  // The value is written verbatim to body.style.height, so any CSS length works (px, %, vh, auto).
+  // It is applied before the first run and never touched again, so it cannot perturb a measurement
+  // in progress. Nothing else on the page reads it.
+  const bodyHeight = new URLSearchParams(location.search).get('bodyHeight');
+  if (bodyHeight) {
+    document.body.style.height = bodyHeight;
+    // Say so on screen: a condition that is invisible in the UI is a condition that gets forgotten
+    // between a capture and its write-up.
+    $('hint').insertAdjacentHTML('beforeend',
+      `<div style="margin-top:6px;font:12px ui-monospace,Menlo,monospace;color:#b91c1c">` +
+      `§8e geometry probe active — body height forced to <b>${bodyHeight}</b> ` +
+      `(computed ${getComputedStyle(document.body).height})</div>`);
+  }
+
   checkWidth();
 </script>
