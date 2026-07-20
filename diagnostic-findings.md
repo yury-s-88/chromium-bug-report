@@ -1268,8 +1268,8 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   the repro machine: **66 674 samples, mean 1.7 µs, 97.2 % of them exactly 0**. The Metal 1 ms-quantised
   `Sleep` poll essentially never sleeps, so `ApplyBackpressure` is **not** the amplifier — the outcome §5c
   predicted from code reading. *(Moved here from Open.)*
-- **Variable vs fixed refresh — ANSWERED: it is the rate, not the variability** *(measured, 2026-07-20;
-  moved here from Open)*. The gap was that the macOS 120 Hz tested had always been ProMotion (adaptive)
+- **Variable vs fixed refresh — ANSWERED (provisionally): it is the rate, not the variability**
+  *(measured, 2026-07-20; moved here from Open, with one validity check outstanding — see below)*. The gap was that the macOS 120 Hz tested had always been ProMotion (adaptive)
   while the smooth 60 Hz was fixed, so "high rate" and "variable rate" were confounded. Now separated on an
   **external fixed 120 Hz panel** — LG C2 over HDMI, 3840×2160 @ 120 Hz, **extended** (not mirrored), **HDR
   off**, **TruMotion/motion interpolation off**, repro window entirely on that display:
@@ -1280,8 +1280,17 @@ maybe its phase**."* — phase being exactly what §5f identifies and what the f
   | by eye | jerky | **jerky** |
   | `Jank3` | 12.5 | 10.1 |
 
-  The panel is demonstrably **stable** (sd 0.16 ms) and the bug still reproduces. **So high refresh rate is
-  sufficient; variable refresh is not required.** *(The `Jank3` 12.5 → 10.1 difference is not a display
+  The vsync source ticks **steadily** at 8.3 ms and the bug still reproduces — **strongly indicating that
+  high refresh rate is sufficient and variable refresh is not required.**
+
+  **Stated as provisional, because one check was not made.** The tight rAF spread shows the *vsync source*
+  is regular and rules out the panel dropping to a lower nominal rate; it does **not** prove adaptive sync
+  was off, since under VRR with steady content the intervals would look the same, and `CVDisplayLink`
+  reports the nominal rate either way. macOS exposes no VRR state for external displays. The definitive
+  check is on the television — LG's Game Optimiser shows a live VRR indicator and a `VRR / AMD FreeSync
+  Premium` toggle — and it has not yet been read or switched off. *(Weak counter-argument, not relied on:
+  a working VRR display follows its source, so irregular delivery would tend to look smooth, and it did
+  not.)* *(The `Jank3` 12.5 → 10.1 difference is not a display
   effect: 8.8 % of frames on the TV run carried `is_handling_interaction` and 8.7 % took the deferred
   commit — the §7g mechanism, matching the 8.5 % of jank-free sequences almost exactly. The remaining
   ~91 % went the immediate path as always.)*
