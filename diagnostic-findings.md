@@ -1245,6 +1245,52 @@ the rAF id stamp on, decoded per window with `analysis/decode_frame_ids.py`. Gen
 across two independent `viz::Display`s would be a cheap, direct demonstration that the loss is below
 per-page scheduling. Untested — listed as an idea, not a result.)*
 
+### 8d. Source dive on the inspector, and what it does and does not explain
+
+**What the code establishes** *(source-readable, `inspector_overlay_agent.cc`, `inspect_tools.cc` @
+150.0.7871.125)*:
+
+- `InspectorOverlayAgent::PageLayoutInvalidated()` calls `ScheduleUpdate()`, which calls
+  `ChromeClient().ScheduleAnimation(GetFrame()->View())`. So while **any** inspect tool is active, *every
+  layout invalidation in the inspected page requests an animation frame* — and card A invalidates layout
+  every frame. This is a direct, per-frame effect of the inspector on the page renderer's frame scheduling.
+- The gate is `IsVisible() == (inspect_tool_ || hinge_)`. `Overlay.highlightNode` — what the front-end sends
+  on hover — installs a `NodeHighlightTool` and calls `EnsureEnableFrameOverlay()`. The grid/flex/scroll-snap
+  overlays instead install a `PersistentTool`, which survives `hideHighlight`.
+- **There is no branch on the node being the document element or `body`** anywhere in the highlight tools.
+  `NodeHighlightTool::Draw()` simply draws.
+
+**Three further experiments, and they refute two of this section's own formulations:**
+
+| condition | result |
+|---|---|
+| **hover** (no selection) over `.block`, `#hint`, or **`head`** in the Elements tree | **smooth** |
+| hover over `html` or `body` | **jerky** |
+| pointer off the tree | jerky |
+| **flex overlay badge enabled on `body`** (body collapsed) | **smooth**; disable it → jerky |
+| `body` **expanded** so `#rafctl`'s row is visible and visibly repainting in the tree | **smooth**, until `body` is collapsed again |
+
+*(`#rafctl` was removed from the page for the hover runs, since inspecting a continuously-updating node is
+itself one of the conditions.)*
+
+- **`head` suppresses**, and `head` has no layout box at all. So it is **not** about the highlighted
+  rectangle, its size, or covering the viewport.
+- **On the same node, `body`, the flex overlay suppresses and hover does not.** So it is **not** about which
+  node is targeted — it is about *which tool is active*, which the earlier "any element inside `body`"
+  formulation missed.
+
+**What the three have in common is that something repaints continuously** — the inspector overlay inside the
+*page's* renderer (hover, flex overlay), or the DevTools front-end itself streaming and rendering DOM
+mutations (the expanded-`body` case, where the visible repainting of `#rafctl`'s row is the whole trigger).
+**But that does not survive contact with the earlier rows:** a second Chrome window continuously animating
+the same repro does *not* suppress. **No account fits all of it, and none is adopted.**
+
+**One question would probably close it, and costs a second:** while hovering `html` or `body` in the
+Elements tree — the only jerky hover cases — **does the page actually show the highlight overlay?** If it
+does not, then every observation here collapses into one rule: *overlay drawing ⇒ smooth, no overlay ⇒
+jerky*, and `html`/`body` are simply cases where the front-end draws nothing. If it does show, that rule is
+dead too.
+
 **So the trigger remains specific and unexplained:** DevTools running, not occluded, with **any element
 inside `body`** selected. `html` / `body` selected does not do it, and what the selection changes has not
 been shown. The Finder-scroll row is still unaccounted for (a different process, no Chrome Display at all;
